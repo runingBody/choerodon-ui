@@ -38,30 +38,26 @@ import 'choerodon-ui/dist/choerodon-ui.css'; // or 'choerodon-ui/dist/choerodon-
 import 'choerodon-ui/dist/choerodon-ui-pro.css'; // or 'choerodon-ui/dist/choerodon-ui-pro.less'
 ```
 
-Or [import components on demand](http://ant-design.gitee.io/docs/react/getting-started#Import-on-Demand)
+Or [import components on demand](https://open-hand.github.io/choerodon-ui/en/docs/other/introduce#%E6%8C%89%E9%9C%80%E5%8A%A0%E8%BD%BD)
 
-### TypeScript
-
-See [Used in TypeScript](http://ant-design.gitee.io/docs/react/use-in-typescript)
 
 ## Internationalization
 
-See [i18n](http://ant-design.gitee.io/docs/react/i18n).
+See [i18n](https://open-hand.github.io/choerodon-ui/en/docs/other/i18n).
 
 ## Links
 
-- [Home page](https://choerodon.github.io/choerodon-ui/index-cn/)
-- [Components](https://choerodon.github.io/choerodon-ui/docs/react/introduce)
+- [Home page](https://open-hand.github.io/choerodon-ui/en)
+- [Components](https://open-hand.github.io/choerodon-ui/en/docs/other/introduce)
 - [Change Log](CHANGELOG.en-US.md)
 - [Scaffold Market](http://scaffold.ant.design)
-- [Ant Design](http://ant-design.gitee.io)
 - [rc-components](http://react-component.github.io/)
-- [Customize Theme](https://choerodon.github.io/choerodon-ui/customize-theme)
+- [Customize Theme](https://open-hand.github.io/choerodon-ui/customize-theme)
 
 ## Local Development
 
 ```bash
-$ git clone https://github.com/choerodon/choerodon-ui.git
+$ git clone https://github.com/open-hand/choerodon-ui.git
 $ cd choerodon-ui
 $ npm install
 $ npm start
@@ -79,4 +75,4 @@ $ npm run deploy
 $ npm run pub
 ```
 
-Open your browser and visit http://127.0.0.1:8001 , see more at https://github.com/ant-design/ant-design/wiki/Development .
+Open your browser and visit http://127.0.0.1:8001 , see more at https://open-hand.github.io/choerodon-ui/en/tutorials/introduction .

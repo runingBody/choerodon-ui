@@ -2,7 +2,7 @@
 order: 1
 title:
   zh-CN: 数据源
-  en-US: DataSet
+  en-US: DataSet  
 ---
 
 ## zh-CN
@@ -45,6 +45,9 @@ const defaultValidationMessages = {
 
 class App extends React.Component {
   ds = new DataSet({
+    data: [
+      { phone: '18116266000' }
+    ],
     fields: [
       {
         name: 'phone',
@@ -81,14 +84,14 @@ class App extends React.Component {
       {
         name: 'language',
         type: 'string',
-        label: '语言',
+        label: '语言（labelWidth为auto自适应）',
         required: true,
         help: '超过两行的帮助信息超过两行的帮助信息超过两行的帮助信息',
       },
       { name: 'email', type: 'email', label: '邮箱', required: true },
       { name: 'homepage', type: 'url', label: '个人主页', required: true },
       { name: 'birth', type: 'date', label: '生日', required: true },
-      { name: 'code', type: 'object', label: '代码描述', lovCode: 'LOV_CODE' },
+      { name: 'code', type: 'object', label: '代码描述', lovCode: 'LOV_CODE', placeholder:"d1" },
       { name: 'frozen', type: 'boolean', label: '是否冻结' },
     ],
   });
@@ -97,9 +100,13 @@ class App extends React.Component {
     this.ds.current.getField('code').set('textField', 'description');
   };
 
+  clear = () => {
+    this.ds.loadData([])
+  };
+
   render() {
     return (
-      <Form dataSet={this.ds} style={{ width: '4.5rem' }}>
+      <Form dataSet={this.ds} style={{ width: '4.5rem' }} labelWidth="auto">
         <TextField name="phone" />
         <Password name="password" />
         <Password name="confirmPassword" />
@@ -116,7 +123,7 @@ class App extends React.Component {
         <EmailField name="email" />
         <UrlField name="homepage" />
         <DatePicker name="birth" />
-        <Lov name="code" />
+        <Lov name="code" placeholder="d2" />
         <Switch name="frozen" />
         <div>
           <Button type="submit">注册</Button>
@@ -125,6 +132,9 @@ class App extends React.Component {
           </Button>
           <Button onClick={this.changeField} style={{ marginLeft: 8 }}>
             设置代码描述的textField
+          </Button>
+          <Button onClick={this.clear} style={{ marginLeft: 8 }}>
+            清空
           </Button>
         </div>
       </Form>

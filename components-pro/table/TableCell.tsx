@@ -1,39 +1,23 @@
-import React, {
-  cloneElement,
-  Component,
-  CSSProperties,
-  HTMLProps,
-  isValidElement,
-  MouseEventHandler,
-  ReactElement,
-  ReactNode,
-} from 'react';
+import React, { cloneElement, Component, CSSProperties, HTMLProps, isValidElement, MouseEventHandler, ReactElement, ReactNode } from 'react';
 import PropTypes from 'prop-types';
 import { observer } from 'mobx-react';
-import { action, computed, isArrayLike, observable, set } from 'mobx';
+import { action, computed, isArrayLike, observable, runInAction } from 'mobx';
 import classNames from 'classnames';
 import raf from 'raf';
 import omit from 'lodash/omit';
 import isObject from 'lodash/isObject';
 import isString from 'lodash/isString';
+import max from 'lodash/max';
 import { pxToRem } from 'choerodon-ui/lib/_util/UnitConvertor';
 import KeyCode from 'choerodon-ui/lib/_util/KeyCode';
 import measureScrollbar from 'choerodon-ui/lib/_util/measureScrollbar';
 import ReactResizeObserver from 'choerodon-ui/lib/_util/resizeObserver';
 import { getConfig } from 'choerodon-ui/lib/configure';
-import { ColumnProps, minColumnWidth } from './Column';
+import { ColumnProps } from './Column';
 import Record from '../data-set/Record';
 import { ElementProps } from '../core/ViewComponent';
 import TableContext from './TableContext';
-import {
-  findCell,
-  findFirstFocusableElement,
-  getAlignByField,
-  getColumnKey,
-  getEditorByColumnAndRecord,
-  isDisabledRow,
-  isRadio,
-} from './utils';
+import { findCell, findFirstFocusableElement, getAlignByField, getColumnKey, getEditorByColumnAndRecord, isDisabledRow, isRadio } from './utils';
 import { FormFieldProps, Renderer } from '../field/FormField';
 import { ColumnAlign, ColumnLock, TableColumnTooltip, TableCommandType } from './enum';
 import ObserverCheckBox from '../check-box/CheckBox';
@@ -42,15 +26,18 @@ import { ShowHelp } from '../field/enum';
 import Button, { ButtonProps } from '../button/Button';
 import { $l } from '../locale-context';
 import Tooltip from '../tooltip/Tooltip';
-import { DataSetEvents, RecordStatus } from '../data-set/enum';
+import { DataSetEvents, FieldType, RecordStatus } from '../data-set/enum';
 import { LabelLayout } from '../form/enum';
 import { Commands, TableButtonProps } from './Table';
 import autobind from '../_util/autobind';
+import { DRAG_KEY, SELECTION_KEY } from './TableStore';
 
 export interface TableCellProps extends ElementProps {
   column: ColumnProps;
   record: Record;
   indentSize: number;
+  isDragging: boolean;
+  lock?: ColumnLock | boolean;
 }
 
 let inTab: boolean = false;
@@ -150,31 +137,6 @@ export default class TableCell extends Component<TableCellProps> {
   @action
   syncSize() {
     this.overflow = this.computeOverFlow();
-    this.setMaxColumnWidth()
-  }
-
-  @action
-  setMaxColumnWidth(): void {
-    const { element } = this;
-    if (element && element.textContent) {
-      const {
-        column,
-      } = this.props;
-      const { innerMaxWidth } = column;
-      if (column) {
-        const { width } = element.getBoundingClientRect();
-        if (width !== 0) {
-          element.style.position = 'absolute';
-          let { width: measureWidth } = element.getBoundingClientRect();
-          element.style.position = '';
-          measureWidth = 20 + measureWidth;
-          const newWidth = Math.max(measureWidth, minColumnWidth(column),column.width?column.width:0);
-          if(!innerMaxWidth || newWidth > innerMaxWidth){
-            set(column, 'innerMaxWidth', newWidth);
-          }
-        }
-      }
-    }
   }
 
   computeOverFlow(): boolean {
@@ -187,13 +149,8 @@ export default class TableCell extends Component<TableCellProps> {
         return true;
       }
       if (tooltip === TableColumnTooltip.overflow) {
-        const { width } = element.getBoundingClientRect();
-        if (width !== 0) {
-          element.style.position = 'absolute';
-          const { width: measureWidth } = element.getBoundingClientRect();
-          element.style.position = '';
-          return measureWidth > width;
-        }
+        const { clientWidth, scrollWidth } = element;
+        return scrollWidth > clientWidth;
       }
     }
     return false;
@@ -226,14 +183,14 @@ export default class TableCell extends Component<TableCellProps> {
   @autobind
   handleFocus(e) {
     const { tableStore } = this.context;
-    const { currentEditorName, dataSet, inlineEdit } = tableStore;
+    const { dataSet, inlineEdit } = tableStore;
     const {
       prefixCls,
       record,
       column,
       column: { lock },
     } = this.props;
-    if (!currentEditorName && !isDisabledRow(record) && (!inlineEdit || record.editing)) {
+    if (column.key !== SELECTION_KEY && !isDisabledRow(record) && (!inlineEdit || record.editing)) {
       dataSet.current = record;
       this.showEditor(e.currentTarget, lock);
       if (!this.cellEditor || isRadio(this.cellEditor)) {
@@ -378,6 +335,7 @@ export default class TableCell extends Component<TableCellProps> {
         column: { name },
         record,
       } = this.props;
+      const field = record.getField(name);
       const { checkField } = dataSet.props;
       const newEditorProps = {
         ...cellEditor.props,
@@ -387,7 +345,14 @@ export default class TableCell extends Component<TableCellProps> {
         disabled: isDisabledRow(record) || (inlineEdit && !record.editing),
         indeterminate: checkField && checkField === name && record.isIndeterminate,
         labelLayout: LabelLayout.none,
+        _inTable: true,
       };
+      /**
+       * 渲染多行编辑器
+       */
+      if (field?.get('multiLine')) {
+        return cellEditor;
+      }
       return cloneElement(cellEditor, newEditorProps as FormFieldProps);
     }
   }
@@ -439,31 +404,76 @@ export default class TableCell extends Component<TableCellProps> {
   getInnerNode(prefixCls, command?: Commands[]) {
     const {
       context: {
-        tableStore: { rowHeight, expandIconAsCell, hasCheckFieldColumn, pristine, props:{ autoMaxWidth } },
+        tableStore: {
+          dataSet,
+          rowHeight,
+          expandIconAsCell,
+          hasCheckFieldColumn,
+          pristine,
+        },
+        tableStore,
       },
       props: { children },
     } = this;
     if (expandIconAsCell && children) {
       return children;
     }
-    const { column, record, indentSize } = this.props;
-    const { name, tooltip } = column;
+    const { column, record, indentSize, lock } = this.props;
+    const { name, tooltip, key } = column;
     const { hasEditor } = this;
+    // 计算多行编辑单元格高度
+    const field = record.getField(name);
     const innerProps: any = {
       className: `${prefixCls}-inner`,
       tabIndex: hasEditor && !isDisabledRow(record) ? 0 : -1,
       onFocus: this.handleFocus,
       pristine,
     };
+    let rows = 0;
+    if (field?.get('multiLine')) {
+      rows = dataSet.props.fields?.map(fields => {
+        if (fields.bind && fields.bind.split('.')[0] === name) {
+          return record.getField(fields.name) || dataSet.getField(fields.name);
+        }
+      }).filter(f => f).length;
+      const multiLineHeight = rows > 0 ? (rowHeight + 2) * rows + 1 : rowHeight;
+      if (multiLineHeight > Number((max(tableStore.multiLineHeight) || 0))) {
+        runInAction(() => {
+          tableStore.setMultiLineHeight(multiLineHeight);
+        });
+      }
+    }
+
     if (!hasEditor) {
       innerProps.onKeyDown = this.handleEditorKeyDown;
     }
     if (rowHeight !== 'auto') {
+      const isCheckBox = field && field.type === FieldType.boolean || key === SELECTION_KEY;
+      const borderPadding = isCheckBox ? 4 : 2;
+      const heightPx = rows > 0 ? (rowHeight + 2) * rows + 1 : rowHeight;
+      const lineHeightPx = hasEditor ? rowHeight - borderPadding :
+        isCheckBox ? rowHeight - borderPadding : rowHeight;
       innerProps.style = {
-        height: pxToRem(rowHeight),
+        height: pxToRem(heightPx),
+        lineHeight: rows > 0 ? 'inherit' : pxToRem(lineHeightPx),
       };
-      if(autoMaxWidth|| (tooltip && tooltip !== TableColumnTooltip.none)){
+      // 处理多行横向滚动lock列高度
+      if (tableStore.multiLineHeight.length && lock) {
+        innerProps.style = {
+          height: pxToRem(max(tableStore.multiLineHeight) || 0),
+          lineHeight: pxToRem(max(tableStore.multiLineHeight) || 0),
+        };
+      }
+      if ((tooltip && tooltip !== TableColumnTooltip.none) || (key === DRAG_KEY)) {
         innerProps.ref = this.saveOutput;
+      }
+      // 如果为拖拽结点强制给予焦点
+      if (key === DRAG_KEY) {
+        innerProps.onMouseDown = () => {
+          if (this.element) {
+            this.element.focus();
+          }
+        };
       }
     }
     const indentText = children && (
@@ -505,9 +515,9 @@ export default class TableCell extends Component<TableCellProps> {
   }
 
   render() {
-    const { column, prefixCls, record } = this.props;
+    const { column, prefixCls, record, isDragging } = this.props;
     const {
-      tableStore: { inlineEdit, pristine,props:{autoMaxWidth} },
+      tableStore: { inlineEdit, pristine },
     } = this.context;
     const { className, style, align, name, onCell, tooltip } = column;
     const command = this.getCommand();
@@ -516,10 +526,10 @@ export default class TableCell extends Component<TableCellProps> {
     const cellExternalProps: HTMLProps<HTMLTableCellElement> =
       typeof onCell === 'function'
         ? onCell({
-            dataSet: record.dataSet!,
-            record,
-            column,
-          })
+          dataSet: record.dataSet!,
+          record,
+          column,
+        })
         : {};
     const cellStyle: CSSProperties = {
       textAlign: align || (command ? ColumnAlign.center : getAlignByField(field)),
@@ -532,21 +542,35 @@ export default class TableCell extends Component<TableCellProps> {
         [`${cellPrefix}-dirty`]: field && !pristine && field.dirty,
         [`${cellPrefix}-required`]: field && !inlineEdit && field.required,
         [`${cellPrefix}-editable`]: !inlineEdit && this.hasEditor,
+        [`${cellPrefix}-multiLine`]: field && field.get('multiLine'),
       },
       className,
       cellExternalProps.className,
     );
+    const widthDraggingStyle = (): React.CSSProperties => {
+      const draggingStyle: React.CSSProperties = {};
+      if (isDragging) {
+        if (column.width) {
+          draggingStyle.width = pxToRem(column.width);
+        }
+        if (column.minWidth) {
+          draggingStyle.minWidth = pxToRem(column.minWidth);
+        }
+        draggingStyle.whiteSpace = 'nowrap';
+      }
+      return draggingStyle;
+    };
     const td = (
       <td
         {...cellExternalProps}
         className={classString}
-        style={omit(cellStyle, ['width', 'height'])}
+        style={{ ...omit(cellStyle, ['width', 'height']), ...widthDraggingStyle() }}
         data-index={getColumnKey(column)}
       >
         {this.getInnerNode(cellPrefix, command)}
       </td>
     );
-    return (autoMaxWidth || tooltip === TableColumnTooltip.overflow) ? (
+    return tooltip === TableColumnTooltip.overflow ? (
       <ReactResizeObserver onResize={this.handleResize} resizeProp="width">
         {td}
       </ReactResizeObserver>

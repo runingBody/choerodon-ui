@@ -1,8 +1,6 @@
-import * as React from 'react';
+import React, { useEffect } from 'react';
 import classNames from 'classnames';
-// @ts-ignore
-import CSSMotion from 'rc-animate/lib/CSSMotion';
-// @ts-ignore
+import CSSMotion from 'rc-motion';
 import TreeNode, { TreeNodeProps } from './TreeNode';
 import { FlattenNode } from './interface';
 import { getTreeNodeProps, TreeNodeRequiredProps } from './utils/treeUtil';
@@ -11,24 +9,23 @@ import { TreeContext } from './contextTypes';
 interface MotionTreeNodeProps extends Omit<TreeNodeProps, 'domRef'> {
   active: boolean;
   motion?: any;
-  motionNodes?: FlattenNode[];
+  motionNodes?: FlattenNode[] | null;
+  onMotionStart: () => void;
   onMotionEnd: () => void;
-  motionType?: 'show' | 'hide';
+  motionType?: 'show' | 'hide' | null;
 
   treeNodeRequiredProps: TreeNodeRequiredProps;
 }
-// @ts-ignore
-const MotionTreeNode: React.ForwardRefRenderFunction<
-  CSSMotion,
-  MotionTreeNodeProps
-> = (
+
+const MotionTreeNode: React.RefForwardingComponent<HTMLDivElement, MotionTreeNodeProps> = (
   {
     className,
     style,
     motion,
     motionNodes,
     motionType,
-    onMotionEnd,
+    onMotionStart: onOriginMotionStart,
+    onMotionEnd: onOriginMotionEnd,
     active,
     treeNodeRequiredProps,
     ...props
@@ -36,16 +33,38 @@ const MotionTreeNode: React.ForwardRefRenderFunction<
   ref,
 ) => {
   const [visible, setVisible] = React.useState(true);
-  // @ts-ignore
-  const { prefixCls } = React.useContext(TreeContext);
+  const { prefixCls, ripple } = React.useContext(TreeContext);
 
-  React.useEffect(() => {
+  const motionedRef = React.useRef(false);
+
+  const onMotionEnd = () => {
+    if (!motionedRef.current) {
+      onOriginMotionEnd();
+    }
+    motionedRef.current = true;
+  };
+
+  useEffect(() => {
     if (motionNodes && motionType === 'hide' && visible) {
       setVisible(false);
     }
   }, [motionNodes]);
 
+  useEffect(() => {
+    // Trigger motion only when patched
+    if (motionNodes) {
+      onOriginMotionStart();
+    }
+
+    return () => {
+      if (motionNodes) {
+        onMotionEnd();
+      }
+    };
+  }, []);
+
   if (motionNodes) {
+
     return (
       <CSSMotion
         ref={ref}
@@ -58,10 +77,7 @@ const MotionTreeNode: React.ForwardRefRenderFunction<
         {({ className: motionClassName, style: motionStyle }, motionRef) => (
           <div
             ref={motionRef}
-            className={classNames(
-              `${prefixCls}-treenode-motion`,
-              motionClassName,
-            )}
+            className={classNames(`${prefixCls}-treenode-motion`, motionClassName)}
             style={motionStyle}
           >
             {motionNodes.map((treeNode: FlattenNode) => {
@@ -72,10 +88,7 @@ const MotionTreeNode: React.ForwardRefRenderFunction<
               } = treeNode;
               delete restProps.children;
 
-              const treeNodeProps = getTreeNodeProps(
-                key,
-                treeNodeRequiredProps,
-              );
+              const treeNodeProps = getTreeNodeProps(key!, treeNodeRequiredProps);
 
               return (
                 <TreeNode
@@ -83,9 +96,10 @@ const MotionTreeNode: React.ForwardRefRenderFunction<
                   {...treeNodeProps}
                   active={active}
                   data={treeNode.data}
-                  key={key}
+                  key={key!}
                   isStart={isStart}
                   isEnd={isEnd}
+                  ripple={ripple}
                 />
               );
             })}
@@ -94,19 +108,11 @@ const MotionTreeNode: React.ForwardRefRenderFunction<
       </CSSMotion>
     );
   }
-  return (
-    <TreeNode
-      domRef={ref}
-      className={className}
-      style={style}
-      {...props}
-      active={active}
-    />
-  );
+  return <TreeNode domRef={ref} className={className} style={style} {...props} active={active} />;
 };
 
 MotionTreeNode.displayName = 'MotionTreeNode';
 
-const RefMotionTreeNode = React.forwardRef(MotionTreeNode);
+const RefMotionTreeNode = React.forwardRef<HTMLDivElement, MotionTreeNodeProps>(MotionTreeNode);
 
 export default RefMotionTreeNode;

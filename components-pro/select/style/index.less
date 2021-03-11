@@ -12,30 +12,45 @@
 
   margin: 0;
 
+  &-disabled {
+    i {
+      color: @input-border-color;
+    }
+  }
+
   &-trigger {
     transition: transform 0.3s;
   }
 
   &-expand &-trigger {
     transform: rotate(180deg);
+    &.icon-search {
+      transform: none;
+    }
+    &-common-item-wrapper {
+      display: none !important;
+    }
   }
 
   &-dropdown-menu {
     .dropdown-menu;
   }
 
-  &-select-all-none {
-    padding: 0.08rem 0.16rem;
-    font-size: @font-size-sm;
-    border-bottom: @border-width-base @border-style-base @border-color-base;
+  .select-all;
 
-    span {
-      color: @primary-color;
-      cursor: pointer;
-    }
+  &-common-item {
+    margin-top: 0.04rem;
+    color: @label-color;
+    background: @component-background;
+  }
 
-    span + span {
-      margin-left: 0.2rem;
-    }
+  &-common-item-selected {
+    color: @primary-color;
+  }
+
+  &-common-item-label {
+    display: inline-block;
+    margin-top: 0.04rem;
+    margin-right: 0.04rem;
   }
 }

@@ -198,7 +198,7 @@ export default class FilterSelect extends TextField<FilterSelectProps> {
           if (field.get('multiple')) {
             fieldValue = (fieldValue || [])[repeat];
           }
-          if (field.get('bind')) return;
+          if (field.get('bind') || !fieldValue) return;
           return `${this.getFieldLabel(field)}: ${processFieldValue(
             isPlainObject(fieldValue) ? fieldValue : super.processValue(fieldValue),
             field,
@@ -280,7 +280,7 @@ export default class FilterSelect extends TextField<FilterSelectProps> {
         }
         this.setValue(filtered);
       } else {
-        this.setValue(values.filter(item => item === name));
+        this.setValue(values.filter(item => item !== name));
       }
     } else if (isNil(value)) {
       this.setValue(values.filter(item => item !== name));
@@ -430,7 +430,7 @@ export default class FilterSelect extends TextField<FilterSelectProps> {
   }
 
   getFieldEditor(props, selectField: Field): ReactElement<FormFieldProps> {
-    const editor: ReactElement<FormFieldProps> = getEditorByField(selectField);
+    const editor: ReactElement<FormFieldProps> = getEditorByField(selectField, true);
     const editorProps: FormFieldProps = {
       ...props,
       key: 'value',
@@ -442,7 +442,7 @@ export default class FilterSelect extends TextField<FilterSelectProps> {
       renderer: noop,
     };
 
-    if (editor.type === (ObserverSelect as any)) {
+    if ((editor.type as any).__PRO_SELECT) {
       (editorProps as SelectProps).dropdownMenuStyle = this.props.dropdownMenuStyle;
       (editorProps as SelectProps).dropdownMatchSelectWidth = false;
     }
@@ -483,6 +483,9 @@ export default class FilterSelect extends TextField<FilterSelectProps> {
     if (record) {
       record.clear();
     }
+    this.setValue(undefined);
+    this.setSelectField(undefined);
+    this.element.text = undefined;
   }
 
   renderWrapper(): ReactNode {

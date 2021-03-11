@@ -166,6 +166,44 @@ describe('NumberField-pro', () => {
     expect(wrapper).toMatchSnapshot();
   });
 
+
+  it('the input number should correctly add when the {plus} icon clicked and nonStrictStep', () => {
+    const wrapper = mount(<NumberField step={3} nonStrictStep defaultValue={5} />);
+    wrapper
+      .find('.c7n-pro-input-number-plus')
+      .at(0)
+      .simulate('mousedown');
+    jest.runOnlyPendingTimers();
+    wrapper.update();
+    expect(wrapper.find('.c7n-pro-input-number').prop('value')).toBe('8');
+  });
+
+  it('the input number should correctly add when the {plus} icon clicked and no nonStrictStep', () => {
+    const wrapper = mount(<NumberField step={3} defaultValue={5} />);
+    wrapper
+      .find('.c7n-pro-input-number-plus')
+      .at(0)
+      .simulate('mousedown');
+    jest.runOnlyPendingTimers();
+    wrapper.update();
+    expect(wrapper.find('.c7n-pro-input-number').prop('value')).toBe('6');
+  });
+
+  it('the input number should show correctly when set formatter ', () => {
+    const wrapper = mount(<NumberField step={1} defaultValue={5000} formatter={(value)=>value} />);
+    const noFormatterWrapper = mount(<NumberField step={1} defaultValue={5000} />);
+
+    expect(wrapper.find('.c7n-pro-input-number').prop('value')).toBe('5000');
+    expect(noFormatterWrapper.find('.c7n-pro-input-number').prop('value')).toBe('5,000');
+
+  });
+
+  it('the input number should show correctly when set formatterOptions ', () => {
+    const wrapper = mount(<NumberField step={0.1} defaultValue={5000.3} formatterOptions={{options:{useGrouping:false}}}  />);
+    expect(wrapper.find('.c7n-pro-input-number').prop('value')).toBe('5000.3');
+  });
+
+
   it('{min,step} should control the input value', () => {
     const wrapper = mount(<NumberField step={1.1} min={-0.3} />);
     expect(wrapper.find('.c7n-pro-input-number').prop('value')).toBe('');

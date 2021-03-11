@@ -1,5 +1,6 @@
 @import '../../../components/style/themes/default';
 @import '../../../components/style/mixins/index';
+@import 'mixin';
 
 @modal-prefix-cls: ~'@{c7n-pro-prefix}-modal';
 
@@ -13,21 +14,6 @@
   &-center {
     right: 0;
     left: 0;
-  }
-
-  &-fullscreen {
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    width: auto;
-
-    .@{modal-prefix-cls}-footer {
-      position: absolute;
-      right: 0;
-      bottom: 0;
-      left: 0;
-    }
   }
 
   &-content {
@@ -76,9 +62,7 @@
     }
 
     &-drawer {
-      position: absolute;
-      bottom: 0;
-      width: 100%;
+      flex-shrink: 0;
       text-align: left;
     }
 
@@ -95,26 +79,11 @@
     z-index: @zindex-modal-container;
   }
 
-  &-active {
-    z-index: 2;
-  }
+  .active;
+  .border;
 
-  &-drawer {
-    top: 0;
-    right: 0;
-    left: unset;
-    height: 100vh;
-    transition: margin-right @animation-duration-slow @ease-in-out;
-  }
-
-  &-drawer &-header,
-  &-border &-header {
-    border-bottom: @border-width-base @border-style-base @border-color-base;
-  }
-
-  &-drawer &-footer,
-  &-border &-footer {
-    border-top: @border-width-base @border-style-base @border-color-base;
+  &-title-none {
+    border-bottom: none !important;
   }
 
   &-header-buttons {
@@ -148,6 +117,45 @@
   &-movable {
     cursor: move;
     user-select: none;
+  }
+
+  &-fullscreen {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+
+    .@{modal-prefix-cls}-content {
+      display: flex;
+      flex-direction: column;
+      flex-wrap: nowrap;
+      border-radius: @border-radius-base;
+    }
+
+    .@{modal-prefix-cls}-body {
+      flex-grow: 1;
+      max-height: none;
+    }
+
+    .@{modal-prefix-cls}-footer {
+      flex-shrink: 0;
+    }
+  }
+
+  .drawer(@modal-prefix-cls);
+
+  &-auto-center {
+    top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+  }
+
+  &-auto-center &-content {
+    min-width: 5.2rem;
+    height: min-content;
   }
 }
 
@@ -203,6 +211,6 @@
   right: 0;
   bottom: 0;
   left: 0;
-  z-index: 1;
+  z-index: 2;
   background-color: @modal-mask-bg;
 }

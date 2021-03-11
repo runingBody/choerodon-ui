@@ -5,6 +5,7 @@ import { observer } from 'mobx-react';
 import omit from 'lodash/omit';
 import uniqBy from 'lodash/uniqBy';
 import { T } from 'choerodon-ui/lib/upload/utils';
+import isEmpty from 'lodash/isEmpty';
 import Button from '../button/Button';
 import { ButtonColor } from '../button/enum';
 import autobind from '../_util/autobind';
@@ -16,6 +17,7 @@ import { UploadFile } from './interface';
 import UploadList from './UploadList';
 import Tooltip from '../tooltip/Tooltip';
 import { $l } from '../locale-context';
+import isIE from '../_util/isIE';
 
 /**
  * 把XMLHttpRequest对象的返回信息转化为字符串
@@ -371,8 +373,13 @@ export default class Upload extends FormField<UploadProps> {
       </Tooltip>
     );
 
+    /**
+     * to solve the ie11 dispaly inline-block with the button cause unaligned
+     */
+    const IeStyle = isIE() ? {display: '-ms-inline-flexbox'} : {} ;
+
     return (
-      <div className={`${prefixCls}`}>
+      <div className={`${prefixCls}`} style={IeStyle}>
         <div className="flex-wrapper">
           <div className={`${prefixCls}-select`}>
             {inputWrapperBtn}
@@ -462,7 +469,9 @@ export default class Upload extends FormField<UploadProps> {
     const { uploadImmediately, onFileChange } = this.props;
     e.target.value = '';
     if (uploadImmediately) {
-      this.uploadFiles(this.fileList);
+      if(!isEmpty(fileBuffer)) {
+        this.uploadFiles(this.fileList);
+      }
     }
     if (onFileChange) {
       onFileChange(this.fileList.slice());
@@ -489,6 +498,7 @@ export default class Upload extends FormField<UploadProps> {
       Modal.error($l('Upload', 'upload_path_unset'));
       return;
     }
+
     if (!this.isAcceptFiles(fileList)) {
       Modal.error($l('Upload', 'not_acceptable_prompt') + accept!.join(','));
       return;

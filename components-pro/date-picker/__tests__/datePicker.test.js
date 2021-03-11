@@ -145,6 +145,16 @@ describe('date-picker-pro', () => {
     wrapper.update();
   });
 
+  it('read only when setting read-only', () => {
+    const wrapper = mount(
+      <DatePicker readOnly />,
+    );
+    const isReadOnly = wrapper.find('input')
+      .at(0)
+      .prop('readOnly');
+    expect(isReadOnly).toBe(true);
+  });
+
   it('the { min, max } property should render year-picker correctly', () => {
     const wrapper = mount(
       <DatePicker mode="year" min={moment('2019-02-10')} max={moment('2021-02-10')} />,
@@ -178,5 +188,22 @@ describe('date-picker-pro', () => {
       .simulate('click');
     jest.runAllTimers();
     wrapper.update();
+  });
+
+  it('the renderExtraFooter is correct rendered ', () => {
+    const wrapper = mount(
+      <DatePicker renderExtraFooter={() => 'extra footer'} />,
+    );
+    wrapper
+      .find('input')
+      .at(0)
+      .simulate('click');
+    jest.runAllTimers();
+    wrapper.update();
+    expect(
+      wrapper
+      .find('.c7n-pro-calendar-footer-extra')
+      .length,
+    ).toBe(1);
   });
 });

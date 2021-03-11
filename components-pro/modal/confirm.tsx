@@ -1,8 +1,9 @@
 import React, { ReactNode } from 'react';
 import noop from 'lodash/noop';
 import { getProPrefixCls } from 'choerodon-ui/lib/configure';
+import ModalManager from '../modal-manager';
 import { ModalProps } from './Modal';
-import { getKey, open } from '../modal-container/ModalContainer';
+import { open } from '../modal-container/ModalContainer';
 import Icon from '../icon';
 import { confirmProps, normalizeProps } from './utils';
 
@@ -12,7 +13,9 @@ export default function confirm(props: ModalProps & confirmProps | ReactNode) {
     type = 'confirm',
     onOk = noop,
     onCancel = noop,
+    onClose = noop,
     iconType,
+    autoCenter = false,
     border = false,
     okCancel = true,
     title,
@@ -28,10 +31,11 @@ export default function confirm(props: ModalProps & confirmProps | ReactNode) {
   );
   return new Promise(resolve => {
     open({
-      key: getKey(),
+      key: ModalManager.getKey(),
       border,
       destroyOnClose: true,
       okCancel,
+      autoCenter,
       closable: false,
       movable: false,
       style: { width: '4.16rem' },
@@ -57,6 +61,13 @@ export default function confirm(props: ModalProps & confirmProps | ReactNode) {
       },
       onCancel: async () => {
         const result = await onCancel();
+        if (result !== false) {
+          resolve('cancel');
+        }
+        return result;
+      },
+      onClose: async () => {
+        const result = await onClose();
         if (result !== false) {
           resolve('cancel');
         }

@@ -20,6 +20,7 @@ export default class Notification extends Component {
     animation: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
     style: PropTypes.object,
     closeIcon: PropTypes.node,
+    contentClassName: PropTypes.string,
   };
 
   static defaultProps = {
@@ -100,11 +101,13 @@ export default class Notification extends Component {
 
   render() {
     const props = this.props;
+    const { contentClassName } = props
     const noticeNodes = this.state.notices.map(notice => {
       const onClose = createChainedFunction(this.remove.bind(this, notice.key), notice.onClose);
       return (
         <Notice
           prefixCls={props.prefixCls}
+          contentClassName={contentClassName}
           {...notice}
           onClose={onClose}
           closeIcon={props.closeIcon}

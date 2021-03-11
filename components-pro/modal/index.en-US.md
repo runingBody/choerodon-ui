@@ -20,7 +20,7 @@ title: Modal
 | closable | 显示右上角关闭按钮 | boolean | false |
 | movable | 可移动， drawer 无法移动 | boolean | true |
 | fullScreen | 全屏显示 | boolean | false |
-| maskClosable | 点击蒙层是否允许关闭 | boolean | false |
+| maskClosable | 点击蒙层是否允许关闭，可选 boolean \| click \| dblclick | boolean \| string | false |
 | mask | 是否显示蒙层 | boolean | true |
 | maskStyle | 蒙层样式 | CSSProperties |  |
 | maskClassName | 蒙层自定义样式名 | string |  |
@@ -34,11 +34,18 @@ title: Modal
 | onCancel | 点击取消回调，返回`false` `Promise.resolve(false)`或`Promise.reject()`不会关闭， 其他自动关闭 | () => Promise&lt;boolean&gt; |  |
 | afterClose | 关闭后回调 | () => void |  |
 | drawer | 抽屉模式 | boolean | false |
-| drawerTransitionName | 抽屉模式使用的动画 | string | 'slide-right' |
-| okCancel | 同时显示 ok 和 cancel 按钮，false 的时候只显示 ok 按钮 | boolean | true |
+| drawerTransitionName | 抽屉模式使用的动画， 可选值： 'slide-right' 'slide-left' 'slide-up' 'slide-down' | string | 'slide-right' |
+| drawerOffset | 抽屉之间的位移距离 | number | 150 |
+| okButton | 显示 ok 按钮 | boolean | true |
+| cancelButton | 显示 cancel 按钮 | boolean | |
+| okCancel | \<deprecated\> 同时显示 ok 和 cancel 按钮，false 的时候只显示 ok 按钮 | boolean | true |
 | okFirst | ok 按钮是否排在第一个 | boolean | true |
 | okProps | ok 按钮属性 | object |  |
 | cancelProps | cancel 按钮属性 | object |  |
+| keyboard	| 是否支持键盘 esc 关闭	| boolean	| true |
+| autoCenter	| 是否居中显示	| boolean	| false |
+| contentStyle | 内容样式 | object |  |
+| bodyStyle | 内容体样式 | object |  |
 
 <style>
 .code-box-demo .c7n-pro-btn {

@@ -56,6 +56,9 @@ Array [
   "Skeleton",
   "AutoComplete",
   "Cascader",
+  "PerformanceTable",
+  "RichText",
+  "Screening",
 ]
 `;
 
@@ -121,5 +124,8 @@ Array [
   "Responsive",
   "configure",
   "getConfig",
+  "Result",
+  "ImageCrop",
+  "Statistic",
 ]
 `;

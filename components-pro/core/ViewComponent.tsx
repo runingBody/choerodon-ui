@@ -1,21 +1,12 @@
-import {
-  Component,
-  CSSProperties,
-  FocusEventHandler,
-  Key,
-  KeyboardEventHandler,
-  MouseEventHandler,
-} from 'react';
+import { Component, CSSProperties, FocusEventHandler, Key, KeyboardEventHandler, MouseEventHandler } from 'react';
 import { findDOMNode } from 'react-dom';
 import classNames from 'classnames';
 import PropTypes from 'prop-types';
-import { action, observable } from 'mobx';
+import { action, computed, observable } from 'mobx';
 import omit from 'lodash/omit';
-import omitBy from 'lodash/omitBy';
 import defer from 'lodash/defer';
 import merge from 'lodash/merge';
 import noop from 'lodash/noop';
-import isUndefined from 'lodash/isUndefined';
 import classes from 'component-classes';
 import { getProPrefixCls } from 'choerodon-ui/lib/configure';
 import autobind from '../_util/autobind';
@@ -113,42 +104,52 @@ export interface MouseEventComponentProps {
    * 单击回调
    */
   onClick?: MouseEventHandler<any>;
+  onClickCapture?: MouseEventHandler<any>;
   /**
    * 双击回调
    */
   onDoubleClick?: MouseEventHandler<any>;
+  onDoubleClickCapture?: MouseEventHandler<any>;
   /**
    * 右点击回调
    */
   onContextMenu?: MouseEventHandler<any>;
+  onContextMenuCapture?: MouseEventHandler<any>;
   /**
    * 鼠标抬起回调
    */
   onMouseUp?: MouseEventHandler<any>;
+  onMouseUpCapture?: MouseEventHandler<any>;
   /**
    * 鼠标点下回调
    */
   onMouseDown?: MouseEventHandler<any>;
+  onMouseDownCapture?: MouseEventHandler<any>;
   /**
    * 鼠标移动回调
    */
   onMouseMove?: MouseEventHandler<any>;
+  onMouseMoveCapture?: MouseEventHandler<any>;
   /**
    * 鼠标进入回调
    */
   onMouseEnter?: MouseEventHandler<any>;
+  onMouseEnterCapture?: MouseEventHandler<any>;
   /**
    * 鼠标离开回调
    */
   onMouseLeave?: MouseEventHandler<any>;
+  onMouseLeaveCapture?: MouseEventHandler<any>;
   /**
    * 鼠标进入回调，与onMouseEnter区别在于鼠标进入子节点时会触发onMouseOut
    */
   onMouseOver?: MouseEventHandler<any>;
+  onMouseOverCapture?: MouseEventHandler<any>;
   /**
    * 鼠标离开回调，与onMouseLeave区别在于子节点的onMouseout会冒泡触发本回调
    */
   onMouseOut?: MouseEventHandler<any>;
+  onMouseOutCapture?: MouseEventHandler<any>;
 }
 
 /** 响应键盘事件组件 */
@@ -300,10 +301,11 @@ export default class ViewComponent<P extends ViewComponentProps> extends Compone
     return getProPrefixCls(suffixCls!, prefixCls);
   }
 
+  @computed
   get lang(): Lang {
-    const { lang } = this.props;
+    const { lang } = this.observableProps;
     if (lang) {
-      return lang!;
+      return lang;
     }
     return localeContext.locale.lang;
   }
@@ -324,8 +326,10 @@ export default class ViewComponent<P extends ViewComponentProps> extends Compone
     };
   }
 
-  getObservableProps(_props, _context: any) {
-    return {};
+  getObservableProps(props, _context: any) {
+    return {
+      lang: props.lang,
+    };
   }
 
   @action
@@ -337,8 +341,7 @@ export default class ViewComponent<P extends ViewComponentProps> extends Compone
   updateObservableProps(props, context: any) {
     Object.assign(
       this.observableProps,
-      omitBy(this.getObservableProps(props, context), isUndefined),
-      true,
+      this.getObservableProps(props, context),
     );
   }
 
@@ -428,8 +431,8 @@ export default class ViewComponent<P extends ViewComponentProps> extends Compone
     );
   }
 
-  isDisabled() {
-    const { disabled } = this.props;
+  isDisabled(): boolean {
+    const { disabled = false } = this.props;
     return disabled;
   }
 

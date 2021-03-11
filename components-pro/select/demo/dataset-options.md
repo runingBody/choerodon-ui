@@ -7,11 +7,11 @@ title:
 
 ## zh-CN
 
-数据源选项。
+数据源选项。当有分页时，请使用object类型字段，并且通过接口查询出显示值绑定到该字段上， 因为选项只会加载第一页数据，导致没有匹配的显示值。
 
 ## en-US
 
-DataSet Options
+DataSet Options. 当有分页时，请使用object类型字段，并且通过接口查询出显示值绑定到该字段上， 因为选项只会加载第一页数据，导致没有匹配的显示值。
 
 ```jsx
 import { DataSet, Select, Row, Col, Button } from 'choerodon-ui/pro';
@@ -30,20 +30,42 @@ function handleDataSetChange({ record, name, value, oldValue }) {
 class App extends React.Component {
   optionDs = new DataSet({
     selection: 'single',
-    queryUrl: '/dataset/user/queries',
+    transport: {
+      read({ params: { page, pagesize } }) {
+        return {
+          url: `/dataset/user/page/${pagesize}/${page}`,
+        };
+      },
+    },
     autoQuery: true,
   });
 
   ds = new DataSet({
+    data: [
+      { userid: '15', name: '戴刚' }
+    ],
     fields: [
       {
         name: 'user',
-        type: 'string',
+        type: 'object',
         textField: 'name',
         valueField: 'userid',
         label: '用户',
         options: this.optionDs,
+        ignore: 'always',
       },
+      {
+        name: 'account',
+        multiple: true,
+      },
+      {
+        name: 'name',
+        bind: 'user.name'
+      },
+       {
+         name: 'userid',
+         bind: 'user.userid'
+       }
     ],
     events: {
       update: handleDataSetChange,
@@ -54,6 +76,7 @@ class App extends React.Component {
     this.ds.addField('account', {
       name: 'account',
       type: 'string',
+      multiple: true,
       textField: 'name',
       valueField: 'userid',
       label: '账户',
@@ -66,14 +89,13 @@ class App extends React.Component {
       <Row gutter={10}>
         <Col span={8}>
           <Select
-            multiple
             optionsFilter={record => record.get('sex') === 'F'}
             dataSet={this.ds}
             name="user"
           />
         </Col>
         <Col span={8}>
-          <Select multiple dataSet={this.ds} name="account" />
+          <Select dataSet={this.ds} name="account" />
         </Col>
         <Col span={8}>
           <Button onClick={this.changeOptions}>切换选项</Button>

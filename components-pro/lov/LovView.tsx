@@ -6,7 +6,8 @@ import { getConfig } from 'choerodon-ui/lib/configure';
 import { pick } from 'lodash';
 import DataSet from '../data-set/DataSet';
 import Table, { TableProps } from '../table/Table';
-import { SelectionMode, TableMode } from '../table/enum';
+import TableProfessionalBar from '../table/query-bar/TableProfessionalBar';
+import { SelectionMode, TableMode, TableQueryBarType } from '../table/enum';
 import { DataSetSelection } from '../data-set/enum';
 import { LovConfig } from './Lov';
 import { ColumnProps } from '../table/Column';
@@ -53,18 +54,27 @@ export default class LovView extends Component<LovViewProps> {
   getColumns(): ColumnProps[] | undefined {
     const {
       config: { lovItems },
+      tableProps,
     } = this.props;
     return lovItems
       ? lovItems
         .filter(({ gridField }) => gridField === 'Y')
         .sort(({ gridFieldSequence: seq1 }, { gridFieldSequence: seq2 }) => seq1 - seq2)
-        .map<ColumnProps>(({ display, gridFieldName, gridFieldWidth, gridFieldAlign }) => ({
-          key: gridFieldName,
-          header: display,
-          name: gridFieldName,
-          width: gridFieldWidth,
-          align: gridFieldAlign,
-        }))
+        .map<ColumnProps>(({ display, gridFieldName, gridFieldWidth, gridFieldAlign }) => {
+          let column: ColumnProps | undefined = {};
+          if (tableProps && tableProps.columns) {
+            column = tableProps.columns.find(c => c.name === gridFieldName);
+          }
+          return {
+            ...column,
+            key: gridFieldName,
+            header: display,
+            name: gridFieldName,
+            width: gridFieldWidth,
+            align: gridFieldAlign,
+            editor: false,
+          };
+        })
       : undefined;
   }
 
@@ -76,22 +86,41 @@ export default class LovView extends Component<LovViewProps> {
     }
   };
 
-  handleRow = () => {
-    const { onDoubleClick } = this.props;
+  /**
+   * 单选 onRow 处理
+   * @param props
+   */
+  handleRow = (props) => {
+    const { onDoubleClick, tableProps } = this.props;
+    let tablePropsOnRow;
+    if (tableProps?.onRow) tablePropsOnRow = tableProps.onRow(props);
     return {
       onDoubleClick,
+      ...tablePropsOnRow,
     };
+  };
+
+  getQueryBar() {
+    const {
+      config: { queryBar },
+      tableProps,
+    } = this.props;
+    if (queryBar) {
+      return queryBar;
+    }
+    if (tableProps && tableProps.queryBar) {
+      return tableProps.queryBar;
+    }
   };
 
   render() {
     const {
       dataSet,
-      config: { height, treeFlag, queryColumns, queryBar },
+      config: { height, treeFlag, queryColumns },
       multiple,
       tableProps,
     } = this.props;
     const lovTableProps: TableProps = {
-      ...getConfig('lovTableProps'),
       ...tableProps,
       autoFocus: true,
       mode: treeFlag === 'Y' ? TableMode.tree : TableMode.list,
@@ -99,8 +128,9 @@ export default class LovView extends Component<LovViewProps> {
       dataSet,
       columns: this.getColumns(),
       queryFieldsLimit: queryColumns,
-      queryBar,
+      queryBar: this.getQueryBar(),
     };
+
     if (multiple) {
       lovTableProps.selectionMode = SelectionMode.rowbox;
     } else {
@@ -112,9 +142,14 @@ export default class LovView extends Component<LovViewProps> {
       lovTableProps.style = { ...lovTableProps.style, height };
     }
 
+    const isProfessionalBar = getConfig('queryBar') === TableQueryBarType.professionalBar;
+    if (!lovTableProps.queryBar && isProfessionalBar) {
+      lovTableProps.queryBar = (props) => <TableProfessionalBar {...props} queryBarProps={{ labelWidth: 80 }} />;
+    }
+
     // 优化优先级 让 部分tableProps属性 的优先级大于dataSet的设置
     // 目前需要处理 selectionMode
-    Object.assign(lovTableProps, pick({ ...getConfig('lovTableProps'), ...tableProps }, [
+    Object.assign(lovTableProps, pick({ ...tableProps }, [
       'selectionMode',
     ]));
 

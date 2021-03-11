@@ -1,14 +1,14 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /**
  * Handle virtual list of the TreeNodes.
  */
 
 import * as React from 'react';
-import VirtualList from 'rc-virtual-list';
-import { FlattenNode, Key, DataEntity, DataNode, ScrollTo } from './interface';
+import omit from 'lodash/omit';
+import VirtualList, { ListRef } from 'rc-virtual-list';
+import { DataEntity, DataNode, FlattenNode, Key, ScrollTo } from './interface';
 import MotionTreeNode from './MotionTreeNode';
 import { findExpandedKeys, getExpandRange } from './utils/diffUtil';
-import { getTreeNodeProps, getKey } from './utils/treeUtil';
+import { getKey, getTreeNodeProps, TreeNodeRequiredProps } from './utils/treeUtil';
 
 const HIDDEN_STYLE = {
   width: 0,
@@ -21,7 +21,8 @@ const HIDDEN_STYLE = {
   margin: 0,
 };
 
-const noop = () => {};
+const noop = () => {
+};
 
 export const MOTION_KEY = `RC_TREE_MOTION_${Math.random()}`;
 
@@ -49,15 +50,16 @@ const MotionFlattenData: FlattenNode = {
 
 export interface NodeListRef {
   scrollTo: ScrollTo;
+  getIndentWidth: () => number;
 }
 
 interface NodeListProps {
   prefixCls: string;
-  style: React.CSSProperties;
+  style?: React.CSSProperties;
   data: FlattenNode[];
   motion: any;
   focusable?: boolean;
-  activeItem: FlattenNode;
+  activeItem: FlattenNode | null;
   focused?: boolean;
   tabIndex: number;
   checkable?: boolean;
@@ -73,18 +75,21 @@ interface NodeListProps {
   keyEntities: Record<Key, DataEntity>;
 
   dragging: boolean;
-  dragOverNodeKey: Key;
-  dropPosition: number;
+  dragOverNodeKey: Key | null;
+  dropPosition: number | null;
 
   // Virtual list
-  height: number;
-  itemHeight: number;
+  height?: number;
+  itemHeight?: number;
   virtual?: boolean;
 
   onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
   onFocus?: React.FocusEventHandler<HTMLDivElement>;
   onBlur?: React.FocusEventHandler<HTMLDivElement>;
-  onActiveChange: (key: Key) => void;
+  onActiveChange: (key: Key | null) => void;
+
+  onListChangeStart: () => void;
+  onListChangeEnd: () => void;
 }
 
 /**
@@ -92,10 +97,11 @@ interface NodeListProps {
  */
 export function getMinimumRangeTransitionRange(
   list: FlattenNode[],
+  virtual: boolean | undefined,
   height: number,
   itemHeight: number,
 ) {
-  if (!height) {
+  if (virtual === false || !height) {
     return list;
   }
 
@@ -122,16 +128,10 @@ function getAccessibilityPath(item: FlattenNode): string {
   return path;
 }
 
-const RefNodeList: React.RefForwardingComponent<NodeListRef, NodeListProps> = (
-  props,
-  ref,
-) => {
+const RefNodeList: React.RefForwardingComponent<NodeListRef, NodeListProps> = (props, ref) => {
   const {
     prefixCls,
     data,
-    // eslint-disable-next-line no-unused-vars 
-    selectable,
-    // eslint-disable-next-line no-unused-vars  
     expandedKeys,
     selectedKeys,
     checkedKeys,
@@ -160,33 +160,39 @@ const RefNodeList: React.RefForwardingComponent<NodeListRef, NodeListProps> = (
     onBlur,
     onActiveChange,
 
+    onListChangeStart,
+    onListChangeEnd,
+
     ...domProps
   } = props;
 
   // =============================== Ref ================================
-  const listRef = React.useRef<VirtualList<FlattenNode>>(null);
+  const listRef = React.useRef<ListRef>(null);
+  const indentMeasurerRef = React.useRef<HTMLDivElement>(null);
   React.useImperativeHandle(ref, () => ({
     scrollTo: scroll => {
-      listRef.current!.scrollTo(scroll);
+      const { current } = listRef;
+      if (current) {
+        current.scrollTo(scroll);
+      }
     },
+    getIndentWidth: () => indentMeasurerRef.current ? indentMeasurerRef.current.offsetWidth : 0,
   }));
 
   // ============================== Motion ==============================
-  const [disableVirtual, setDisableVirtual] = React.useState(false);
   const [prevExpandedKeys, setPrevExpandedKeys] = React.useState(expandedKeys);
   const [prevData, setPrevData] = React.useState(data);
   const [transitionData, setTransitionData] = React.useState(data);
-  const [transitionRange, setTransitionRange] = React.useState([]);
-  const [motionType, setMotionType] = React.useState<'show' | 'hide' | null>(
-    null,
-  );
+  const [transitionRange, setTransitionRange] = React.useState<FlattenNode[]>([]);
+  const [motionType, setMotionType] = React.useState<'show' | 'hide' | null>(null);
 
   function onMotionEnd() {
     setPrevData(data);
     setTransitionData(data);
     setTransitionRange([]);
     setMotionType(null);
-    setDisableVirtual(false);
+
+    onListChangeEnd();
   }
 
   // Do animation if expanded keys changed
@@ -197,41 +203,35 @@ const RefNodeList: React.RefForwardingComponent<NodeListRef, NodeListProps> = (
 
     if (diffExpanded.key !== null) {
       if (diffExpanded.add) {
-        const keyIndex = prevData.findIndex(
-          ({ data: { key } }) => key === diffExpanded.key,
-        );
+        const keyIndex = prevData.findIndex(({ data: { key } }) => key === diffExpanded.key);
 
-        if (motion) setDisableVirtual(true);
         const rangeNodes = getMinimumRangeTransitionRange(
-          getExpandRange(prevData, data, diffExpanded.key),
-          height,
-          itemHeight,
+          getExpandRange(prevData, data, diffExpanded.key!),
+          virtual,
+          height!,
+          itemHeight!,
         );
 
         const newTransitionData: FlattenNode[] = prevData.slice();
         newTransitionData.splice(keyIndex + 1, 0, MotionFlattenData);
 
         setTransitionData(newTransitionData);
-        // @ts-ignore
         setTransitionRange(rangeNodes);
         setMotionType('show');
       } else {
-        const keyIndex = data.findIndex(
-          ({ data: { key } }) => key === diffExpanded.key,
-        );
+        const keyIndex = data.findIndex(({ data: { key } }) => key === diffExpanded.key);
 
-        if (motion) setDisableVirtual(true);
         const rangeNodes = getMinimumRangeTransitionRange(
-          getExpandRange(data, prevData, diffExpanded.key),
-          height,
-          itemHeight,
+          getExpandRange(data, prevData, diffExpanded.key!),
+          virtual,
+          height!,
+          itemHeight!,
         );
 
         const newTransitionData: FlattenNode[] = data.slice();
         newTransitionData.splice(keyIndex + 1, 0, MotionFlattenData);
 
         setTransitionData(newTransitionData);
-        // @ts-ignore
         setTransitionRange(rangeNodes);
         setMotionType('hide');
       }
@@ -251,7 +251,7 @@ const RefNodeList: React.RefForwardingComponent<NodeListRef, NodeListProps> = (
 
   const mergedData = motion ? transitionData : data;
 
-  const treeNodeRequiredProps = {
+  const treeNodeRequiredProps: TreeNodeRequiredProps = {
     expandedKeys,
     selectedKeys,
     loadedKeys,
@@ -261,7 +261,7 @@ const RefNodeList: React.RefForwardingComponent<NodeListRef, NodeListProps> = (
     dragOverNodeKey,
     dropPosition,
     keyEntities,
-  };
+  } as TreeNodeRequiredProps;
 
   return (
     <>
@@ -284,16 +284,30 @@ const RefNodeList: React.RefForwardingComponent<NodeListRef, NodeListProps> = (
         />
       </div>
 
+      <div
+        className={`${prefixCls}-treenode`}
+        aria-hidden
+        style={{
+          position: 'absolute',
+          pointerEvents: 'none',
+          visibility: 'hidden',
+          height: 0,
+          overflow: 'hidden',
+        }}
+      >
+        <div className={`${prefixCls}-indent`}>
+          <div ref={indentMeasurerRef} className={`${prefixCls}-indent-unit`} />
+        </div>
+      </div>
+
       <VirtualList<FlattenNode>
-        {...domProps}
-        disabled={disableVirtual}
+        {...omit(domProps, ['selectable', 'checkable'])}
         data={mergedData}
         itemKey={itemKey}
         height={height}
         fullHeight={false}
         virtual={virtual}
         itemHeight={itemHeight}
-        onSkipRender={onMotionEnd}
         prefixCls={`${prefixCls}-list`}
         ref={listRef}
       >
@@ -307,17 +321,13 @@ const RefNodeList: React.RefForwardingComponent<NodeListRef, NodeListProps> = (
           const mergedKey = getKey(key, pos);
           delete restProps.children;
 
-          const treeNodeProps = getTreeNodeProps(
-            mergedKey,
-            treeNodeRequiredProps,
-          );
-          
+          const treeNodeProps = getTreeNodeProps(mergedKey, treeNodeRequiredProps);
+
           return (
             <MotionTreeNode
               {...restProps}
               {...treeNodeProps}
-              // @ts-ignore
-              active={activeItem && key === activeItem.data.key}
+              active={!!activeItem && key === activeItem.data.key}
               pos={pos}
               data={treeNode.data}
               isStart={isStart}
@@ -325,10 +335,10 @@ const RefNodeList: React.RefForwardingComponent<NodeListRef, NodeListProps> = (
               motion={motion}
               motionNodes={key === MOTION_KEY ? transitionRange : null}
               motionType={motionType}
+              onMotionStart={onListChangeStart}
               onMotionEnd={onMotionEnd}
               treeNodeRequiredProps={treeNodeRequiredProps}
               onMouseMove={() => {
-                // @ts-ignore
                 onActiveChange(null);
               }}
             />

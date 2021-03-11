@@ -13,6 +13,7 @@ import throttleAdapterEnhancer from '../axios/throttleAdapterEnhancer';
 import PromiseMerger from '../_util/PromiseMerger';
 
 const adapter = throttleAdapterEnhancer(cacheAdapterEnhancer(axios.defaults.adapter!));
+const noCacheAdapter = throttleAdapterEnhancer(axios.defaults.adapter!);
 
 export type responseData = object[];
 export type responseType = responseData | undefined;
@@ -22,8 +23,7 @@ export class LookupCodeStore {
     return getConfig('axios') || axios;
   }
 
-  batchCallback = (codes): Promise<{ [key: string]: responseData }> => {
-    const lookupBatchAxiosConfig = getConfig('lookupBatchAxiosConfig');
+  batchCallback = (codes: string[], lookupBatchAxiosConfig: (codes: string[]) => AxiosRequestConfig): Promise<{ [key: string]: responseData }> => {
     if (lookupBatchAxiosConfig) {
       return this.axios(lookupBatchAxiosConfig(codes)) as any;
     }
@@ -35,7 +35,7 @@ export class LookupCodeStore {
     getConfig('lookupCache'),
   );
 
-  async fetchLookupData(
+  fetchLookupData(
     key: AxiosRequestConfig | string,
     axiosConfig: AxiosRequestConfig = {},
   ): Promise<responseType> {
@@ -50,23 +50,23 @@ export class LookupCodeStore {
       config = key as AxiosRequestConfig;
     }
     if (config.url) {
-      let data: responseData | undefined;
       // SSR do not fetch the lookup
       if (typeof window !== 'undefined') {
-        const result: any = await this.axios(config);
-        if (result) {
-          data = generateResponseData(result, getConfig('dataKey'));
-        }
+        return this.axios(config).then((result) => {
+          if (result) {
+            return generateResponseData(result, getConfig('dataKey'));
+          }
+        });
       }
-      return data;
     }
+    return Promise.resolve<responseType>(undefined);
   }
 
-  async fetchLookupDataInBatch(code: string): Promise<responseType> {
-    return this.merger.add(code);
+  fetchLookupDataInBatch(code: string, lookupBatchAxiosConfig: (codes: string[]) => AxiosRequestConfig): Promise<responseType> {
+    return this.merger.add(code, lookupBatchAxiosConfig);
   }
 
-  getAxiosConfig(field: Field): AxiosRequestConfig {
+  getAxiosConfig(field: Field, noCache?: boolean): AxiosRequestConfig {
     const lookupAxiosConfig = field.get('lookupAxiosConfig') || getConfig('lookupAxiosConfig');
     const { record } = field;
     const params = getLovPara(field, record);
@@ -77,8 +77,8 @@ export class LookupCodeStore {
       lookupCode: field.get('lookupCode'),
     });
     return {
-      adapter,
       ...config,
+      adapter: config.adapter || (noCache ? noCacheAdapter : adapter),
       url: config.url || this.getUrl(field),
       method: config.method || getConfig('lookupAxiosMethod') || 'post',
       params: config.params || params,
@@ -103,7 +103,8 @@ export class LookupCodeStore {
 
   // @deprecate
   @action
-  clearCache() {}
+  clearCache() {
+  }
 }
 
 export default new LookupCodeStore();

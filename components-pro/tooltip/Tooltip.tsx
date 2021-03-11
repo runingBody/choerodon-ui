@@ -1,10 +1,12 @@
 import React, { Children, Component, isValidElement } from 'react';
 import PropTypes from 'prop-types';
 import { getProPrefixCls } from 'choerodon-ui/lib/configure';
-import Button from 'choerodon-ui/lib/button';
+import noop from 'lodash/noop';
+import isNil from "lodash/isNil";
 import Trigger, { TriggerProps } from '../trigger/Trigger';
 import { Action } from '../trigger/enum';
 import getPlacements, { AdjustOverflow } from './placements';
+import autobind from '../_util/autobind';
 
 export type TooltipPlacement =
   | 'top'
@@ -47,64 +49,85 @@ export interface TooltipProps {
   theme?: TooltipTheme;
 }
 
-const splitObject = (obj:any,keys:string[]) => {
-  const picked:any = {};
-  const ommitted:any = {...obj};
+const splitObject = (obj: any, keys: string[]) => {
+  const picked: any = {};
+  const ommitted: any = { ...obj };
   keys.forEach(key => {
-    if(obj && key in obj){
+    if (obj && key in obj) {
       picked[key] = obj[key];
       delete ommitted[key];
     }
   });
   return { picked, ommitted };
+};
+
+/**
+ * Fix the tooltip won't hide when child element is button
+ * @param element ReactElement
+ */
+function getDisabledCompatobleChildren(element: React.ReactElement<any>) {
+  const elementType = element.type as any;
+  if ((
+    elementType.__PRO_BUTTON ||
+    elementType.__PRO_SWITCH ||
+    elementType.__PRO_CHECKBOX ||
+    elementType.__PRO_RADIO ||
+    elementType.__C7N_BUTTON ||
+    elementType === 'button'
+  ) && element.props.disabled) {
+    const { picked, ommitted } = splitObject(element.props.style, [
+      'position',
+      'left',
+      'right',
+      'top',
+      'bottom',
+      'float',
+      'display',
+      'zIndex',
+    ]);
+    const spanStyle = {
+      display: 'inline-block',
+      ...picked,
+      cursor: 'not-allowed',
+      width: element.props.block ? '100%' : null,
+    };
+    const buttonStyle = {
+      ...ommitted,
+      pointerEvents: 'none',
+    };
+    const child = React.cloneElement(element, {
+      style: buttonStyle,
+      className: null,
+    });
+    return (
+      <span style={spanStyle} className={element.props.classNames}>
+        {child}
+      </span>
+    );
+  }
+  return element;
 }
 
-  /**
-   * Fix the tooltip won't hide when child element is button 
-   * @param element ReactElement
-   */
-  function getDisabledCompatobleChildren(element:React.ReactElement<any>){
-    const elementType = element.type as any
-    if(
-        ( elementType.__Pro_BUTTON === true ||
-          elementType.__Pro_SWITCH === true ||
-          elementType.__Pro_CHECKBOX === true || 
-          (element.type as typeof Button).__ANT_BUTTON || 
-          element.type === 'button') &&
-          element.props.disabled 
-        ){
-          const {picked, ommitted} = splitObject(element.props.style,[
-            'position',
-            'left',
-            'right',
-            'top',
-            'bottom',
-            'float',
-            'display',
-            'zIndex',
-          ]);
-          const spanStyle = {
-            display:'inline-block',
-            ...picked,
-            cursor:'not-allowed',
-            width:element.props.block ? '100%':null,
-          };
-          const buttonStyle = {
-            ...ommitted,
-            pointerEvents:'none',
-          };
-          const child = React.cloneElement(element,{
-            style:buttonStyle,
-            className:null,
-          });
-          return (
-            <span style={spanStyle} className={element.props.classNames}>
-              {child}
-            </span>
-          )
-        }
-        return element
-   }
+const PopupContent: React.FC<{
+  content: React.ReactNode;
+  prefixCls: string;
+  theme?: TooltipTheme;
+  translate: { x: number, y: number }
+}> = (props) => {
+  const { content, prefixCls, theme, translate: { x, y } } = props;
+
+  const arrowCls = `${prefixCls}-popup-arrow`;
+  const contentCls = `${prefixCls}-popup-inner`;
+  const arrowStyle = x || y ? { marginLeft: -x, marginTop: -y } : undefined;
+  return (
+    <div>
+      <div className={`${arrowCls} ${arrowCls}-${theme}`} style={arrowStyle} />
+      <div className={`${contentCls} ${contentCls}-${theme}`}>
+        {content}
+      </div>
+    </div>
+  );
+};
 
 export default class Tooltip extends Component<TooltipProps, any> {
   static displayName = 'Tooltip';
@@ -153,41 +176,13 @@ export default class Tooltip extends Component<TooltipProps, any> {
     trigger: [Action.hover],
   };
 
+  state = {
+    translate: { x: 0, y: 0 },
+  };
+
   get prefixCls(): string {
     const { suffixCls, prefixCls } = this.props;
     return getProPrefixCls(suffixCls!, prefixCls);
-  }
-
-  get popupContent() {
-    const { title } = this.props;
-    if (!title) {
-      return null;
-    }
-    const {
-      prefixCls,
-      props: { overlay, theme },
-    } = this;
-
-    let content: any = '';
-    if (typeof overlay === 'function') {
-      content = overlay();
-    } else if (overlay) {
-      content = overlay;
-    } else {
-      content = title || '';
-    }
-
-    const arrowCls = `${prefixCls}-popup-arrow`;
-    const contentCls = `${prefixCls}-popup-inner`;
-
-    return (
-      <div>
-        <div className={`${arrowCls} ${arrowCls}-${theme}`} key="arrow" />
-        <div className={`${contentCls} ${contentCls}-${theme}`} key="content">
-          {content}
-        </div>
-      </div>
-    );
   }
 
   get placements() {
@@ -202,38 +197,67 @@ export default class Tooltip extends Component<TooltipProps, any> {
     );
   }
 
+  getContent() {
+    const { title, overlay } = this.props;
+    if (typeof overlay === 'function') {
+      return overlay();
+    }
+    if (overlay) {
+      return overlay;
+    }
+    return title;
+  }
+
+  @autobind
+  handlePopupAlign(_source, _align, _target, translate) {
+    const { translate: { x, y } } = this.state;
+    if (x !== translate.x || y !== translate.y) {
+      this.setState({
+        translate,
+      });
+    }
+  }
 
   render() {
+    const { translate } = this.state;
     const {
       prefixCls,
-      popupContent,
-      props: { children, placement, onHiddenChange, trigger, defaultHidden, hidden, ...restProps },
+      props: { children, placement, theme, onHiddenChange, trigger, defaultHidden, hidden, ...restProps },
     } = this;
-    const child = Children.map(children, node => {
-      node = getDisabledCompatobleChildren(
+    // 修复特殊情况为0，以及 undefined 出现的报错情况
+    const child = Children.count(children) ? Children.map(children, node => (
+      !isNil(node) && getDisabledCompatobleChildren(
         isValidElement(node) ? node : <span key={`text-${node}`}>{node}</span>,
       )
-      return node;
-    });
+    )) : null;
 
     const extraProps: TriggerProps = { ...restProps };
     if ('hidden' in this.props) {
       extraProps.popupHidden = hidden;
     }
-
-    return (
+    const content = this.getContent();
+    return content && !isNil(child) ? (
       <Trigger
         prefixCls={prefixCls}
         action={trigger}
         builtinPlacements={this.placements}
         popupPlacement={placement}
-        popupContent={popupContent}
+        popupContent={
+          <PopupContent
+            content={content}
+            theme={theme}
+            prefixCls={prefixCls}
+            translate={translate}
+          />
+        }
         onPopupHiddenChange={onHiddenChange}
+        onPopupAlign={this.handlePopupAlign}
         defaultPopupHidden={defaultHidden}
+        onMouseDown={noop}
         {...extraProps}
       >
         {child}
       </Trigger>
-    );
+    ) : child;
   }
 }

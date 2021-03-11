@@ -4,20 +4,21 @@ import { ReactNode } from 'react';
 import isObject from 'lodash/isObject';
 import { categories } from 'choerodon-ui-font';
 import { LovConfig } from 'choerodon-ui/pro/lib/lov/Lov';
-import { RecordStatus } from 'choerodon-ui/pro/lib/data-set/enum';
+import { RecordStatus, ExportMode } from 'choerodon-ui/pro/lib/data-set/enum';
 import { $l } from 'choerodon-ui/pro/lib/locale-context';
 import {
   expandIconProps,
   TablePaginationConfig,
   TableQueryBarHook,
   TableProps,
+  Suffixes,
 } from 'choerodon-ui/pro/lib/table/Table';
 import { ValidationMessages } from 'choerodon-ui/pro/lib/validator/Validator';
 import { ButtonProps } from 'choerodon-ui/pro/lib/button/Button';
 import { SpinProps } from 'choerodon-ui/lib/spin';
+import { PanelProps } from 'choerodon-ui/lib/collapse';
 import { Size } from 'choerodon-ui/lib/_util/enum';
-import { TableQueryBarType } from 'choerodon-ui/pro/lib/table/enum';
-import { TriggerMode } from 'choerodon-ui/pro/lib/lov/enum';
+import { TableQueryBarType, DragColumnAlign } from 'choerodon-ui/pro/lib/table/enum';
 import { TransportHookProps, TransportProps } from 'choerodon-ui/pro/lib/data-set/Transport';
 import DataSet from 'choerodon-ui/pro/lib/data-set/DataSet';
 import defaultFeedback, { FeedBack } from 'choerodon-ui/pro/lib/data-set/FeedBack';
@@ -27,6 +28,8 @@ import { LabelLayout } from 'choerodon-ui/pro/lib/form/enum';
 import { ButtonColor, FuncType } from 'choerodon-ui/pro/lib/button/enum';
 import { defaultExcludeUseColonTag } from 'choerodon-ui/pro/lib/form/utils';
 import { Renderer } from 'choerodon-ui/pro/lib/field/FormField';
+import { FormatNumberFunc, FormatNumberFuncOptions } from 'choerodon-ui/pro/lib/number-field/NumberField';
+import { ModalProps } from 'choerodon-ui/pro/lib/modal/interface';
 
 export type Status = {
   [RecordStatus.add]: string;
@@ -51,6 +54,9 @@ export type Config = {
   proPrefixCls?: string;
   iconfontPrefix?: string;
   ripple?: boolean;
+  collapseExpandIconPosition?: string;
+  collapseExpandIcon?: (panelProps: PanelProps) => ReactNode | 'text';
+  collapseTrigger?: string;
   lookupCache?: CacheOptions<string, AxiosPromise>;
   lookupUrl?: string | ((code: string) => string);
   lookupAxiosMethod?: string;
@@ -75,7 +81,7 @@ export type Config = {
     lovConfig: LovConfig | undefined,
     props: TransportHookProps,
   ) => AxiosRequestConfig);
-  lovTriggerMode?: TriggerMode;
+  lovModalProps?: ModalProps;
   axios?: AxiosInstance;
   feedback?: FeedBack;
   dataKey?: string;
@@ -83,10 +89,12 @@ export type Config = {
   statusKey?: string;
   tlsKey?: string;
   status?: Status;
+  exportMode?: ExportMode;
   labelLayout?: LabelLayout;
   queryBar?: TableQueryBarType | TableQueryBarHook;
   tableBorder?: boolean;
   tableHighLightRow?: boolean;
+  tableParityRow?: boolean;
   tableSelectedHighLightRow?: boolean;
   tableRowHeight?: 'auto' | number;
   tableColumnResizable?: boolean;
@@ -97,10 +105,20 @@ export type Config = {
   tableDefaultRenderer?: Renderer;
   tableAlwaysShowRowBox?: boolean;
   tableUseMouseBatchChoose?: boolean;
+  tableEditorNextKeyEnterDown?: boolean;
+  tableAutoFocus?: boolean;
+  tableKeyboard?: boolean;
+  tableFilterAdapter?: TransportProps;
+  tableFilterSuffix?: Suffixes[];
+  tableFilterSearchText?: string;
+  tableAutoHeightDiff?: number;
   pagination?: TablePaginationConfig | false;
   modalSectionBorder?: boolean;
+  modalAutoCenter?: boolean;
   modalOkFirst?: boolean;
+  drawerOkFirst?: boolean;
   modalButtonProps?: ButtonProps;
+  modalKeyboard?: boolean;
   buttonFuncType?: FuncType;
   buttonColor?: ButtonColor;
   renderEmpty?: renderEmptyHandler;
@@ -115,9 +133,18 @@ export type Config = {
   }) => object;
   formatter?: Formatter;
   dropdownMatchSelectWidth?: boolean;
+  selectReverse?: boolean;
   useColon?: boolean;
   excludeUseColonTagList?: string[];
   lovTableProps?: TableProps;
+  textFieldAutoComplete?: 'on' | 'off';
+  resultStatusRenderer?: object;
+  tableDragColumnAlign?: DragColumnAlign;
+  tableDragColumn?: boolean;
+  tableDragRow?: boolean;
+  numberFieldNonStrictStep?: boolean;
+  numberFieldFormatter?: FormatNumberFunc;
+  numberFieldFormatterOptions?:FormatNumberFuncOptions;
 };
 
 export type ConfigKeys = keyof Config;
@@ -128,6 +155,8 @@ const defaultRenderEmpty: renderEmptyHandler = (componentName?: string): ReactNo
       return $l('Table', 'empty_data');
     case 'Select':
       return $l('Select', 'no_matching_results');
+    case 'Output':
+      return '';
     default:
   }
 };
@@ -144,6 +173,8 @@ const globalConfig: ObservableMap<ConfigKeys, Config[ConfigKeys]> = observable.m
   ['proPrefixCls', 'c7n-pro'],
   ['iconfontPrefix', 'icon'],
   ['ripple', true],
+  ['collapseExpandIconPosition', 'left'],
+  ['collapseTrigger', 'header'],
   ['lookupCache', { maxAge: 1000 * 60 * 10, max: 100 }],
   ['lookupUrl', code => `/common/code/${code}/`],
   ['lookupAxiosMethod', 'post'],
@@ -159,7 +190,8 @@ const globalConfig: ObservableMap<ConfigKeys, Config[ConfigKeys]> = observable.m
   // ],
   ['lovDefineUrl', code => `/sys/lov/lov_define?code=${code}`],
   ['lovQueryUrl', code => `/common/lov/dataset/${code}`],
-  ['lovTriggerMode', TriggerMode.icon],
+  ['lovTableProps', {}],
+  ['lovModalProps', {}],
   ['dataKey', 'rows'],
   ['totalKey', 'total'],
   ['statusKey', '__status'],
@@ -174,15 +206,23 @@ const globalConfig: ObservableMap<ConfigKeys, Config[ConfigKeys]> = observable.m
   ['tableHighLightRow', true],
   ['tableSelectedHighLightRow', false],
   ['tableRowHeight', 30],
+  ['tableDefaultRenderer', ''],
   ['tableColumnResizable', true],
   ['tableSpinProps', defaultSpinProps],
   ['tableButtonProps', defaultButtonProps],
   ['tableCommandProps', defaultButtonProps],
   ['tableAlwaysShowRowBox', false],
   ['tableUseMouseBatchChoose', false],
-  ['tableDefaultRenderer', ''],
+  ['tableEditorNextKeyEnterDown', true],
+  ['tableAutoFocus', false],
+  ['tableKeyboard', false],
+  ['tableFilterSearchText', 'params'],
+  ['tableAutoHeightDiff', 80],
   ['modalSectionBorder', true],
   ['modalOkFirst', true],
+  ['modalAutoCenter', false],
+  ['drawerOkFirst', undefined],
+  ['modalKeyboard', true],
   ['buttonColor', ButtonColor.default],
   ['buttonFuncType', FuncType.raised],
   ['feedback', defaultFeedback],
@@ -201,9 +241,15 @@ const globalConfig: ObservableMap<ConfigKeys, Config[ConfigKeys]> = observable.m
     },
   ],
   ['dropdownMatchSelectWidth', true],
+  ['selectReverse', true],
   ['useColon', false],
   ['excludeUseColonTagList', defaultExcludeUseColonTag],
-  ['lovTableProps', {}],
+  ['textFieldAutoComplete', undefined],
+  ['tableDragRow', false],
+  ['tableDragColumn', false],
+  ['numberFieldNonStrictStep', false],
+  ['numberFieldFormatter', undefined],
+  ['numberFieldFormatterOptions',undefined],
 ]);
 
 export function getConfig(key: ConfigKeys): any {
@@ -226,7 +272,7 @@ export function getProPrefixCls(suffixCls: string, customizePrefixCls?: string):
   return `${getConfig('proPrefixCls')}-${suffixCls}`;
 }
 
-const mergeProps = ['transport', 'feedback', 'formatter'];
+const mergeProps = ['transport', 'feedback', 'formatter', 'tableFilterAdapter'];
 
 export default function configure(config: Config) {
   runInAction(() => {

@@ -132,3 +132,11 @@ export { default as Responsive } from './responsive';
 export { default as configure } from './configure';
 
 export { default as getConfig } from './get-config';
+
+export { default as Result } from './result';
+
+export { default as ImageCrop } from './image-crop';
+
+export { default as Statistic } from './statistic';
+
+

@@ -38,7 +38,6 @@ export class CheckBox<T extends CheckBoxProps> extends Radio<T & CheckBoxProps> 
      * 未选中时的内容
      */
     unCheckedChildren: PropTypes.node,
-    defaultChecked: PropTypes.bool,
     ...Radio.propTypes,
   };
 
@@ -46,7 +45,10 @@ export class CheckBox<T extends CheckBoxProps> extends Radio<T & CheckBoxProps> 
    * tooltip disable sign
    */
   // eslint-disable-next-line camelcase
-  static __Pro_CHECKBOX = true;
+  static __PRO_CHECKBOX = true;
+
+  // eslint-disable-next-line camelcase
+  static __IS_IN_CELL_EDITOR = true;
 
   static defaultProps = {
     ...Radio.defaultProps,
@@ -93,6 +95,7 @@ export class CheckBox<T extends CheckBoxProps> extends Radio<T & CheckBoxProps> 
       'unCheckedValue',
       'unCheckedChildren',
       'indeterminate',
+      'isFlat',
     ]);
   }
 
@@ -121,7 +124,7 @@ export class CheckBox<T extends CheckBoxProps> extends Radio<T & CheckBoxProps> 
       return false;
     }
     const { name, dataSet, checkedValue } = this;
-    if (dataSet && name) {
+    if (!this.isControlled && dataSet && name) {
       return this.getValues().indexOf(checkedValue) !== -1;
     }
     if (checked !== undefined) {
@@ -175,4 +178,10 @@ export class CheckBox<T extends CheckBoxProps> extends Radio<T & CheckBoxProps> 
 @observer
 export default class ObserverCheckBox extends CheckBox<CheckBoxProps> {
   static defaultProps = CheckBox.defaultProps;
+
+  // eslint-disable-next-line camelcase
+  static __PRO_CHECKBOX = true;
+
+  // eslint-disable-next-line camelcase
+  static __IS_IN_CELL_EDITOR = true;
 }

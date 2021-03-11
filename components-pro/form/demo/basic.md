@@ -58,7 +58,7 @@ const menu = (
       </a>
     </Menu.Item>
     <Menu.Item>
-      <a target="_blank" rel="noopener noreferrer" href="https://github.com/choerodon/choerodon-ui">
+      <a target="_blank" rel="noopener noreferrer" href="https://github.com/open-hand/choerodon-ui">
         3rd menu item
       </a>
     </Menu.Item>
@@ -74,10 +74,19 @@ const dropdown = (
 );
 
 ReactDOM.render(
-  <Form id="basic" style={{ width: '4rem' }}>
+  <Form id="basic" style={{ width: '4rem' }} labelWidth="auto">
     <TextField
       label="手机号"
       labelWidth={150}
+      pattern="1[3-9]\d{9}"
+      name="phone"
+      required
+      clearButton
+      addonBefore="+86"
+      addonAfter="中国大陆"
+    />
+    <TextField
+      label="手机号的label自动宽度"
       pattern="1[3-9]\d{9}"
       name="phone"
       required

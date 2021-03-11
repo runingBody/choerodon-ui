@@ -27,6 +27,7 @@ dist
 /lib
 /es
 /pro
+/public
 elasticsearch-*
 config/base.yaml
 /.vscode/
@@ -38,10 +39,9 @@ components/**/*.d.ts
 components/style/core/fonts
 components-pro/**/*.js
 components-pro/**/*.jsx
-components-pro/**/*.d.ts
-!components/rc-components/**/*.jsx
-!components/rc-components/**/*.js
-components/rc-components/dialog/*.jsx
+#components-pro/**/*.d.ts
+!components/rc-components/**/*.@(jsx|js)
+components/rc-components/dialog/*.@(jsx|js)
 !components/**/__tests__/*.js
 !components/**/__tests__/*.js.snap
 !components-pro/**/__tests__/*.js
@@ -49,5 +49,6 @@ components/rc-components/dialog/*.jsx
 /.history
 jest_*
 .jest-cache/
-components/rc-components/tree/**/*.js
-components/rc-components/tree/*.jsx
+components/rc-components/tree/**/*.@(jsx|js)
+components/form/__tests__/type.js
+site/theme/mock/performance-data/*.js

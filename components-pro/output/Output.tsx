@@ -59,18 +59,30 @@ export default class Output extends FormField<OutputProps> {
     if (field && field.type === FieldType.boolean) {
       return <ObserverCheckBox disabled checked={value === field.get(BooleanValue.trueValue)} />;
     }
-    return super.defaultRenderer({ text, repeat, maxTagTextLength });
+    return super.defaultRenderer({ text, repeat, maxTagTextLength }) || getConfig('renderEmpty')('Output');
   }
 
   getRenderedValue(): ReactNode {
-    const { multiple, range } = this;
+    const { multiple, range, multiLine, currency } = this;
     if (multiple) {
       return this.renderMultipleValues(true);
     }
     if (range) {
       return this.renderRangeValue(true);
     }
-    return this.getTextNode() || getConfig('tableDefaultRenderer');
+    /**
+     * 多行单元格渲染
+     */
+    if (multiLine) {
+      return this.renderMultiLine(true);
+    }
+    /**
+     * 货币渲染
+     */
+    if (currency) {
+      return this.renderCurrency(true);
+    }
+    return this.getTextNode() === '' ? getConfig('tableDefaultRenderer') : this.getTextNode();
   }
 
   renderWrapper(): ReactNode {

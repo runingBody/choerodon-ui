@@ -2,13 +2,11 @@
 
 exports[`TextArea-pro renders TextArea-pro correctly 1`] = `
 <TextArea
-  autoComplete="off"
   autoSize={false}
   clearButton={false}
   disabled={false}
   multiple={false}
   noValidate={false}
-  placeholder=""
   readOnly={false}
   resize="none"
   rows={4}
@@ -305,6 +303,8 @@ exports[`TextArea-pro renders TextArea-pro correctly 1`] = `
               noValidate={false}
               onBlur={[Function]}
               onChange={[Function]}
+              onCompositionEnd={[Function]}
+              onCompositionStart={[Function]}
               onFocus={[Function]}
               onKeyDown={[Function]}
               readOnly={false}
@@ -383,7 +383,6 @@ exports[`TextArea-pro renders TextArea-pro correctly 1`] = `
 exports[`TextArea-pro the dataSet should renders correctly 1`] = `
 <TextAreaTest>
   <TextArea
-    autoComplete="off"
     autoSize={false}
     clearButton={false}
     dataSet={
@@ -527,7 +526,6 @@ exports[`TextArea-pro the dataSet should renders correctly 1`] = `
     multiple={false}
     name="content"
     noValidate={false}
-    placeholder=""
     readOnly={false}
     resize="both"
     rows={4}
@@ -825,6 +823,8 @@ exports[`TextArea-pro the dataSet should renders correctly 1`] = `
                 noValidate={false}
                 onBlur={[Function]}
                 onChange={[Function]}
+                onCompositionEnd={[Function]}
+                onCompositionStart={[Function]}
                 onFocus={[Function]}
                 onKeyDown={[Function]}
                 readOnly={false}

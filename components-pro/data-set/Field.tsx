@@ -1,5 +1,6 @@
-import { action, computed, get, observable, ObservableMap, runInAction, set, toJS } from 'mobx';
+import { action, computed, get, observable, ObservableMap, remove, runInAction, set, toJS } from 'mobx';
 import { MomentInput } from 'moment';
+import raf from 'raf';
 import isFunction from 'lodash/isFunction';
 import isEqual from 'lodash/isEqual';
 import isObject from 'lodash/isObject';
@@ -9,6 +10,7 @@ import unionBy from 'lodash/unionBy';
 import { AxiosRequestConfig } from 'axios';
 import { getConfig } from 'choerodon-ui/lib/configure';
 import warning from 'choerodon-ui/lib/_util/warning';
+import { ReactNode } from 'react';
 import DataSet from './DataSet';
 import Record from './Record';
 import Validator, { CustomValidator, ValidationMessages } from '../validator/Validator';
@@ -16,7 +18,7 @@ import { DataSetEvents, DataSetSelection, FieldFormat, FieldIgnore, FieldTrim, F
 import lookupStore from '../stores/LookupCodeStore';
 import lovCodeStore from '../stores/LovCodeStore';
 import localeContext from '../locale-context';
-import { findBindFields, getLimit, processValue } from './utils';
+import { getLimit, processValue } from './utils';
 import Validity from '../validator/Validity';
 import ValidationResult from '../validator/ValidationResult';
 import { ValidatorProps } from '../validator/rules';
@@ -36,6 +38,9 @@ function isEqualDynamicProps(oldProps, newProps) {
     return true;
   }
   if (isObject(newProps) && isObject(oldProps) && Object.keys(newProps).length) {
+    if (Object.keys(newProps).length !== Object.keys(toJS(oldProps)).length) {
+      return false;
+    }
     return Object.keys(newProps).every(key => {
       const value = newProps[key];
       const oldValue = oldProps[key];
@@ -64,7 +69,7 @@ function getPropsFromLovConfig(lovCode, propsName) {
 }
 
 export type Fields = ObservableMap<string, Field>;
-export type DynamicPropsArguments = { dataSet: DataSet; record: Record; name: string };
+export type DynamicPropsArguments = { dataSet: DataSet; record: Record; name: string; };
 
 export type FieldProps = {
   /**
@@ -83,7 +88,7 @@ export type FieldProps = {
   /**
    * 字段标签
    */
-  label?: string;
+  label?: string | ReactNode;
   /**
    * 字段标签宽度
    */
@@ -108,6 +113,10 @@ export type FieldProps = {
    * 步距
    */
   step?: number | TimeStep;
+  /**
+   * 非严格步距
+   */
+  nonStrictStep?: boolean;
   /**
    * 最大值
    */
@@ -145,6 +154,14 @@ export type FieldProps = {
    */
   valueField?: string;
   /**
+   * 树形值列表的值字段，默认值为`value`
+   */
+  idField?: string;
+  /**
+   * 树形值列表的父值字段
+   */
+  parentField?: string;
+  /**
    *  类型为boolean时，true对应的值
    */
   trueValue?: string | number | boolean;
@@ -171,6 +188,11 @@ export type FieldProps = {
    * @default false
    */
   multiple?: boolean | string;
+  /**
+   * 是否为多行类型
+   * @default false
+   */
+  multiLine?: boolean;
   /**
    * 是否为范围值
    * 当为true时，则值为[startValue, endValue]
@@ -230,6 +252,10 @@ export type FieldProps = {
     | AxiosRequestConfig
     | ((code: string, lovConfig?: LovConfig) => AxiosRequestConfig);
   /**
+   * 批量值列表请求的axiosConfig
+   */
+  lookupBatchAxiosConfig?: (codes: string[]) => AxiosRequestConfig;
+  /**
    * 内部字段别名绑定
    */
   bind?: string;
@@ -238,7 +264,7 @@ export type FieldProps = {
    */
   dynamicProps?:
     | ((props: DynamicPropsArguments) => FieldProps | undefined)
-    | { [key: string]: (DynamicPropsArguments) => any };
+    | { [key: string]: (DynamicPropsArguments) => any; };
   /**
    * 快码和LOV查询时的级联参数映射
    * @example
@@ -297,17 +323,54 @@ export default class Field {
 
   record?: Record;
 
-  pristineProps: FieldProps;
+  validator: Validator;
 
-  validator: Validator = new Validator(this);
-
-  pending: PromiseQueue = new PromiseQueue();
+  pending: PromiseQueue;
 
   lastDynamicProps: any = {};
 
+  changingProps: any = {};
+
+  validatorPropKeys: string[] = [];
+
   isDynamicPropsComputing: boolean = false;
 
-  @observable props: FieldProps & { [key: string]: any };
+  @observable props: FieldProps & { [key: string]: any; };
+
+  @observable dirtyProps: Partial<FieldProps>;
+
+  @computed
+  get pristineProps(): FieldProps {
+    return {
+      ...this.props,
+      ...this.dirtyProps,
+    };
+  }
+
+  set pristineProps(props: FieldProps) {
+    runInAction(() => {
+      const { dirtyProps } = this;
+      const dirtyKeys = Object.keys(dirtyProps);
+      if (dirtyKeys.length) {
+        const newProps = {};
+        dirtyKeys.forEach((key) => {
+          const item = this.props[key];
+          newProps[key] = item;
+          if (isSame(item, props[key])) {
+            delete dirtyProps[key];
+          } else {
+            dirtyProps[key] = props[key];
+          }
+        });
+        this.props = {
+          ...props,
+          ...newProps,
+        };
+      } else {
+        this.props = props;
+      }
+    });
+  }
 
   @computed
   get lookup(): object[] | undefined {
@@ -328,14 +391,24 @@ export default class Field {
     }
     // 确保 lookup 相关配置介入观察
     lookupStore.getAxiosConfig(this);
-    const { lookup } = this;
+    const { lookup, type } = this;
     if (lookup) {
+      const parentField = this.get('parentField');
+      const idField = this.get('idField') || this.get('valueField');
       const selection = this.get('multiple') ? DataSetSelection.multiple : DataSetSelection.single;
       return new DataSet({
         data: lookup,
         paging: false,
         selection,
+        idField,
+        parentField,
       });
+    }
+    const lovCode = this.get('lovCode');
+    if (lovCode) {
+      if (type === FieldType.object || type === FieldType.auto) {
+        return lovCodeStore.getLovDataSet(lovCode, this);
+      }
     }
     return undefined;
   }
@@ -363,23 +436,8 @@ export default class Field {
       return intlFields.some(langField => langField.dirty);
     }
     if (record) {
-      const pristineValue = toJS(record.getPristineValue(name));
-      const value = toJS(record.get(name));
-      if (isObject(pristineValue) && isObject(value)) {
-        if (isEqual(pristineValue, value)) {
-          return false;
-        }
-        try {
-          const fields = findBindFields(this, record.fields, true);
-          if (fields.length) {
-            return fields.some(({ dirty }) => dirty);
-          }
-        } catch (e) {
-          console.error(e);
-          return true;
-        }
-      }
-      return !isSame(pristineValue, value);
+      const { dirtyData } = record;
+      return [...dirtyData.keys()].some(key => key === name || key.startsWith(`${name}.`));
     }
     return false;
   }
@@ -417,12 +475,19 @@ export default class Field {
 
   constructor(props: FieldProps = {}, dataSet?: DataSet, record?: Record) {
     runInAction(() => {
+      this.validator = new Validator(this);
+      this.pending = new PromiseQueue();
       this.dataSet = dataSet;
       this.record = record;
-      this.pristineProps = props;
+      this.dirtyProps = {};
       this.props = props;
-      this.fetchLookup();
-      this.fetchLovConfig();
+      // 优化性能，没有动态属性时不用处理， 直接引用dsField； 有options时，也不处理
+      if (!this.getProp('options') && (!record || this.getProp('dynamicProps'))) {
+        raf(() => {
+          this.fetchLookup();
+          this.fetchLovConfig();
+        });
+      }
     });
   }
 
@@ -430,7 +495,7 @@ export default class Field {
    * 获取所有属性
    * @return 属性对象
    */
-  getProps(): FieldProps & { [key: string]: any } {
+  getProps(): FieldProps & { [key: string]: any; } {
     const dsField = this.findDataSetField();
     const lovCode = this.get('lovCode');
     return merge(
@@ -442,6 +507,7 @@ export default class Field {
       this.props,
     );
   }
+
 
   /**
    * 根据属性名获取属性值
@@ -535,12 +601,15 @@ export default class Field {
   set(propsName: string, value: any): void {
     const oldValue = this.get(propsName);
     if (!isEqualDynamicProps(oldValue, value)) {
+      if (!(propsName in this.dirtyProps)) {
+        set(this.dirtyProps, propsName, oldValue);
+      } else if (isSame(toJS(this.dirtyProps[propsName]), value)) {
+        remove(this.dirtyProps, propsName);
+      }
       set(this.props, propsName, value);
       const { record, dataSet, name } = this;
-      if (record) {
-        if (propsName === 'type') {
-          record.set(name, processValue(record.get(name), this));
-        }
+      if (record && propsName === 'type') {
+        record.set(name, processValue(record.get(name), this));
       }
       if (dataSet) {
         dataSet.fireEvent(DataSetEvents.fieldChange, {
@@ -580,15 +649,15 @@ export default class Field {
   }
 
   /**
-   * 根据lookup值获取lookup含义
+   * 可以根据lookup值获取含义
    * @param value lookup值
    * @param boolean showValueIfNotFound
    * @return {string}
    */
-  getText(value: any = this.getValue(), showValueIfNotFound?: boolean): string | undefined {
+  getLookupText(value: any = this.getValue(), showValueIfNotFound?: boolean): string | undefined {
     const textField = this.get('textField');
     const valueField = this.get('valueField');
-    const { lookup, options } = this;
+    const { lookup } = this;
     if (lookup) {
       const found = lookup.find(obj => isSameLike(get(obj, valueField), value));
       if (found) {
@@ -598,6 +667,43 @@ export default class Field {
         return value;
       }
       return undefined;
+    }
+  }
+
+  /**
+   * 可以根据options值获取含义
+   * @param value opions值
+   * @param boolean showValueIfNotFound
+   * @return {string}
+   */
+  getOptionsText(value: any = this.getValue(), showValueIfNotFound?: boolean): string | undefined {
+    const textField = this.get('textField');
+    const valueField = this.get('valueField');
+    const { options } = this;
+    if (options) {
+      const found = options.find(record => isSameLike(record.get(valueField), value));
+      if (found) {
+        return found.get(textField);
+      }
+      if (showValueIfNotFound) {
+        return value;
+      }
+      return undefined;
+    }
+  }
+
+  /**
+   * 根据lookup值获取lookup含义
+   * @param value lookup值
+   * @param boolean showValueIfNotFound
+   * @return {string}
+   */
+  getText(value: any = this.getValue(), showValueIfNotFound?: boolean): string | undefined {
+    const textField = this.get('textField');
+    const valueField = this.get('valueField');
+    const { lookup, options } = this;
+    if (lookup && !isObject(value)) {
+      return this.getLookupText(value, showValueIfNotFound);
     }
     if (options) {
       const found = options.find(record => isSameLike(record.get(valueField), value));
@@ -624,7 +730,8 @@ export default class Field {
    */
   @action
   reset(): void {
-    this.props = this.pristineProps;
+    Object.assign(this.props, this.dirtyProps);
+    this.dirtyProps = {};
   }
 
   @action
@@ -721,6 +828,7 @@ export default class Field {
       const format = this.get('format') || getDateFormatByField(this, this.type);
       const pattern = this.get('pattern');
       const step = this.get('step');
+      const nonStrictStep = this.get('nonStrictStep') === undefined ? getConfig('numberFieldNonStrictStep') : this.get('nonStrictStep');
       const minLength = this.get('minLength');
       const maxLength = this.get('maxLength');
       const label = this.get('label');
@@ -728,7 +836,7 @@ export default class Field {
       const multiple = this.get('multiple');
       const unique = this.get('unique');
       const defaultValidationMessages = this.get('defaultValidationMessages');
-      return {
+      const validatorProps = {
         type,
         required,
         record,
@@ -740,6 +848,7 @@ export default class Field {
         max: getLimit(max, record),
         min: getLimit(min, record),
         step,
+        nonStrictStep,
         minLength,
         maxLength,
         label,
@@ -748,6 +857,10 @@ export default class Field {
         format,
         defaultValidationMessages,
       };
+      if (!this.validatorPropKeys.length) {
+        this.validatorPropKeys = Object.keys(validatorProps);
+      }
+      return validatorProps;
     }
   }
 
@@ -770,10 +883,11 @@ export default class Field {
 
   /**
    * 请求lookup值, 如有缓存值直接获得。
+   * @param noCache default: undefined
    * @return Promise<object[]>
    */
-  async fetchLookup(): Promise<object[] | undefined> {
-    const batch = getConfig('lookupBatchAxiosConfig');
+  async fetchLookup(noCache = undefined): Promise<object[] | undefined> {
+    const batch = this.get('lookupBatchAxiosConfig') || getConfig('lookupBatchAxiosConfig');
     const lookupCode = this.get('lookupCode');
     const lovPara = getLovPara(this, this.record);
     const dsField = this.findDataSetField();
@@ -785,11 +899,11 @@ export default class Field {
       }
 
       result = await this.pending.add<object[] | undefined>(
-        lookupStore.fetchLookupDataInBatch(lookupCode),
+        lookupStore.fetchLookupDataInBatch(lookupCode, batch),
       );
     } else {
-      const axiosConfig = lookupStore.getAxiosConfig(this);
-      if (dsField) {
+      const axiosConfig = lookupStore.getAxiosConfig(this, noCache);
+      if (dsField && noCache === false) {
         const dsConfig = lookupStore.getAxiosConfig(dsField);
         if (
           dsConfig.url &&
@@ -812,9 +926,10 @@ export default class Field {
         const value = this.getValue();
         const valueField = this.get('valueField');
         if (value && valueField && lookup) {
+          const values = this.get('multiple') ? [].concat(...value) : [].concat(value);
           this.set(
             'lookupData',
-            [].concat(value).reduce<object[]>((lookupData, v) => {
+            values.reduce<object[]>((lookupData, v) => {
               const found = lookup.find(item => isSameLike(item[valueField], v));
               if (found) {
                 lookupData.push(found);
@@ -828,16 +943,10 @@ export default class Field {
     return result;
   }
 
-  async fetchLovConfig() {
+  fetchLovConfig() {
     const lovCode = this.get('lovCode');
     if (lovCode) {
-      await this.pending.add(lovCodeStore.fetchConfig(lovCode, this));
-      if (this.type === FieldType.object || this.type === FieldType.auto) {
-        const options = lovCodeStore.getLovDataSet(lovCode, this);
-        if (options) {
-          this.set('options', options);
-        }
-      }
+      this.pending.add(lovCodeStore.fetchConfig(lovCode, this));
     }
   }
 
@@ -871,20 +980,16 @@ export default class Field {
   }
 
   private checkDynamicProp(propsName, newProp) {
-    // if (propsName in this.lastDynamicProps) {
     const oldProp = this.lastDynamicProps[propsName];
-    if (!isEqualDynamicProps(oldProp, newProp)) {
-      defer(
-        action(() => {
-          if (propsName in this.validator.props || propsName === 'validator') {
-            this.validator.reset();
-            // this.checkValidity();
-          }
-          this.handlePropChange(propsName, newProp, oldProp);
-        }),
-      );
+    if (!this.changingProps[propsName] && !isEqualDynamicProps(oldProp, newProp)) {
+      this.changingProps[propsName] = true;
+      if (this.validatorPropKeys.includes(propsName) || propsName === 'validator') {
+        defer(() => this.validator.reset());
+      }
+      this.handlePropChange(propsName, newProp, oldProp);
+
+      this.changingProps[propsName] = false;
     }
-    // }
     this.lastDynamicProps[propsName] = newProp;
   }
 

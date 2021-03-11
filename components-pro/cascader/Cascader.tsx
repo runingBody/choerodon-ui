@@ -1,4 +1,4 @@
-import React, { CSSProperties, isValidElement, Key, ReactNode } from 'react';
+import React, { CSSProperties, isValidElement, Key, ReactElement, ReactNode } from 'react';
 import PropTypes from 'prop-types';
 import omit from 'lodash/omit';
 import isEqual from 'lodash/isEqual';
@@ -7,14 +7,15 @@ import isEmpty from 'lodash/isEmpty';
 import noop from 'lodash/noop';
 import isPlainObject from 'lodash/isPlainObject';
 import { observer } from 'mobx-react';
-import { action, observable, toJS, computed, IReactionDisposer, isArrayLike, reaction, runInAction } from 'mobx';
-import { Menus } from 'choerodon-ui/lib/rc-components/cascader';
+import { action, observable, computed, IReactionDisposer, isArrayLike, reaction, runInAction, toJS } from 'mobx';
+import { Menus, SingleMenu } from 'choerodon-ui/lib/rc-components/cascader';
 import KeyCode from 'choerodon-ui/lib/_util/KeyCode';
 import { getConfig } from 'choerodon-ui/lib/configure';
 import { pxToRem } from 'choerodon-ui/lib/_util/UnitConvertor';
 import cloneDeep from 'lodash/cloneDeep';
 import isFunction from 'lodash/isFunction';
 import isObject from 'lodash/isObject';
+import { MenuMode } from 'choerodon-ui/lib/cascader';
 import TriggerField, { TriggerFieldProps } from '../trigger-field/TriggerField';
 import autobind from '../_util/autobind';
 import { ValidationMessages } from '../validator/Validator';
@@ -120,7 +121,27 @@ export interface CascaderProps extends TriggerFieldProps {
   /**
    * 设置选项属性，如 disabled;
    */
-  onOption: (props: onOptionProps) => OptionProps;
+  onOption?: (props: onOptionProps) => OptionProps ;
+  /**
+   * 选择一个值的时候触发
+   */
+  onChoose?: (value,record) => void;
+  /**
+   * 取消选中一个值的时候触发多选时候生效
+   */
+  onUnChoose?: (value,record) => void;
+  /** 单框弹出形式切换 */
+  menuMode?: MenuMode;
+  /** 由于渲染在body下可以方便按照业务配置弹出框的大小 */
+  singleMenuStyle?: CSSProperties,
+  /** 由于渲染在body下可以方便按照业务配置超出大小样式和最小宽度等 */
+  singleMenuItemStyle?: CSSProperties,
+  /** 设置需要的提示问题配置 */
+  singlePleaseRender?: ({key,className,text}:{key: string,className: string,text: string}) => ReactElement<any>,
+  /** 头部可以渲染出想要的tab样子 */
+  singleMenuItemRender?: (title:string) => ReactElement<any>,
+  /** 选择及改变 */
+  changeOnSelect?: boolean,
 }
 
 export class Cascader<T extends CascaderProps> extends TriggerField<T> {
@@ -161,9 +182,23 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
      */
     notFoundContent: PropTypes.node,
     /**
+     * 选择一个值的时候触发
+     */
+    onChoose: PropTypes.func,
+    /**
+     * 取消选中一个值的时候触发多选时候生效
+     */
+    onUnChoose: PropTypes.func,
+    /** 选择及改变 */
+    changeOnSelect: PropTypes.bool,
+    /**
      * 设置选项属性，如 disabled;
      */
     onOption: PropTypes.func,
+    singleMenuStyle: PropTypes.object,
+    singleMenuItemStyle: PropTypes.object,
+    singlePleaseRender: PropTypes.func,
+    singleMenuItemRender: PropTypes.func,
     ...TriggerField.propTypes,
   };
 
@@ -180,6 +215,12 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
 
   @observable menuItemWith: number;
 
+  @observable clickTab;
+
+  @computed 
+  get isClickTab() {
+    return this.clickTab;
+  }
 
   @computed
   get activeValue(): any {
@@ -195,6 +236,7 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
     super(props, context);
     this.setActiveValue({});
     this.setItemMenuWidth(0);
+    this.setIsClickTab(false);
   }
 
   findActiveRecord(value, options) {
@@ -223,6 +265,10 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
   @action
   setActiveValue(activeValues: any) {
     this.activeValues = activeValues;
+  }
+
+  @action setIsClickTab(isClickTab: boolean) {
+    this.clickTab = isClickTab;
   }
 
   @action
@@ -394,7 +440,14 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
       'onOption',
       'expandTrigger',
       'dropdownMatchSelectWidth',
-      'dropdownMenuStyle',
+      'menuMode',
+      'singleMenuStyle',
+      'singleMenuItemStyle',
+      'singlePleaseRender',
+      'singleMenuItemRender', 
+      'onChoose',
+      'onUnChoose',
+      'changeOnSelect',
     ]);
     return otherProps;
   }
@@ -485,23 +538,37 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
       options,
       textField,
       valueField,
-      props: { dropdownMenuStyle, expandTrigger, onOption },
+      props: {
+        dropdownMenuStyle, 
+        expandTrigger : expandTriggerProps, 
+        onOption, 
+        menuMode,
+        singleMenuStyle,
+        singleMenuItemStyle,
+        singlePleaseRender,
+        changeOnSelect,
+        singleMenuItemRender,
+      },
     } = this;
     if (!options) {
       return null;
     }
+    const expandTrigger = changeOnSelect && menuMode !== MenuMode.single ? ExpandTrigger.hover : expandTriggerProps;
     const menuDisabled = this.isDisabled();
     let optGroups: any[] = [];
     let selectedValues: any[] = [];
+    // 确保tabkey唯一
+    let deepindex = 0;
     const treePropsChange = (treeRecord: ProcessOption[] | Record[]) => {
       let treeRecords: any = [];
       if (treeRecord.length > 0) {
         // @ts-ignore
         treeRecords = treeRecord.map((recordItem, index) => {
+          deepindex++
           const value = this.getRecordOrObjValue(recordItem, valueField);
           const text = this.getRecordOrObjValue(recordItem, textField);
-          if (recordItem instanceof Record) {
-            const optionProps = onOption({ dataSet: options, record: recordItem });
+          if (recordItem instanceof Record ) {
+            const optionProps = onOption ? onOption({ dataSet: options, record: recordItem }) : undefined;
             const optionDisabled = menuDisabled || (optionProps && optionProps.disabled);
             const key: Key = getItemKey(recordItem, text, value);
             let children;
@@ -526,22 +593,22 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
               value: recordItem,
             });
           }
-          const optionProps = onOption({ dataSet: options, record: recordItem });
-          const optionDisabled = recordItem.disabled || optionProps;
-          const key: Key = index;
+          const optionProps = onOption ? onOption({ dataSet: options, record: recordItem }) : undefined;
+          const optionDisabled = recordItem.disabled || (optionProps && optionProps.disabled);
+          const key: Key = `${deepindex}-${index}`;
           let children: any;
           if (recordItem.children) {
             children = treePropsChange(recordItem.children);
           }
           return (children ? {
-            ...optionDisabled,
+            ...optionProps,
             key,
             label: text,
             value: recordItem,
             children,
             disabled: optionDisabled,
           } : {
-            ...optionDisabled,
+            ...optionProps,
             key,
             label: text,
             value: recordItem,
@@ -558,7 +625,17 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
     } else {
       optGroups = [];
     }
-
+    const getInputSelectedValue = (inputValue) => {
+        let activeInputValue = [];
+        if (isArrayLike(options)) {
+          activeInputValue = this.findParentRecodTree(this.findActiveRecord(inputValue, this.options));
+        } else if (options instanceof DataSet) {
+          activeInputValue = this.findParentRecodTree(this.findActiveRecord(inputValue, this.options.treeData));
+        } else {
+          activeInputValue = [];
+        }
+        return activeInputValue
+    }
     /**
      * 获取当前激活的menueItem
      * 以及value 展示激活状态的判断
@@ -573,13 +650,7 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
         if (inputValue && arraySameLike(this.treeValueToArray(this.activeValue), inputValue) || this.activeValue.children) {
           activeValue = this.findParentRecodTree(this.activeValue);
         } else if (this.activeValue) {
-          if (isArrayLike(options)) {
-            activeValue = this.findParentRecodTree(this.findActiveRecord(inputValue, this.options));
-          } else if (options instanceof DataSet) {
-            activeValue = this.findParentRecodTree(this.findActiveRecord(inputValue, this.options.treeData));
-          } else {
-            activeValue = [];
-          }
+          activeValue = getInputSelectedValue(inputValue)
         }
       } else if (inputValue) {
         activeValue = this.findParentRecodTree(this.activeValue);
@@ -604,22 +675,63 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
     if ((this.itemMenuWidth > 0)) {
       dropdownMenuStyleMerge = { ...dropdownMenuStyle, width: pxToRem(this.itemMenuWidth) };
     }
-    return options && options.length > 0 ? (
-      <Menus
-        {...menuProps}
-        prefixCls={this.prefixCls}
-        expandTrigger={expandTrigger}
-        activeValue={selectedValues}
-        options={optGroups}
-        onSelect={this.handleMenuClick}
-        dropdownMenuColumnStyle={dropdownMenuStyleMerge}
-        visible={this.popup}
-      />
-    ) : (
+    // 由于想让多选出现不同展现这边增加一个selected属性来解决但是会造成一定的性能损耗
+    
+    let selectedValueMutiple
+    if(this.multiple) {
+      const selectedMutiple= this.getValues()
+                                .map(item => getInputSelectedValue(item))
+                                .filter((recordItem) => recordItem !== undefined && recordItem !== null)
+      selectedValueMutiple = Array.from(new Set(selectedMutiple.reduce((accumulator, currentValue) => [...accumulator, ...currentValue],[])))
+    }
+    
+    // 渲染成单项选择还是多项选择组件以及空组件
+    if(options && options.length){
+      if( menuMode === MenuMode.single ){
+        return (
+          <SingleMenu
+          {...menuProps}
+          singleMenuStyle = {singleMenuStyle}
+          singleMenuItemStyle = {singleMenuItemStyle}
+          singlePleaseRender = {singlePleaseRender}
+          singleMenuItemRender ={singleMenuItemRender}
+          prefixCls={this.prefixCls}
+          expandTrigger={expandTrigger}
+          activeValue={selectedValues}
+          selectedValues={selectedValueMutiple}
+          options={optGroups}
+          locale={{pleaseSelect:$l('Cascader', 'please_select')}}
+          onSelect={this.handleMenuClick}
+          isTabSelected={this.isClickTab}
+          dropdownMenuColumnStyle={dropdownMenuStyleMerge}
+          visible={this.popup} />
+        )
+      }
+      return (
+        <Menus
+          {...menuProps}
+          prefixCls={this.prefixCls}
+          expandTrigger={expandTrigger}
+          activeValue={selectedValues}
+          selectedValues={selectedValueMutiple}
+          options={optGroups}
+          onSelect={this.handleMenuClick}
+          dropdownMenuColumnStyle={dropdownMenuStyleMerge}
+          visible={this.popup}
+        />
+      )
+    }
+    return (
       <div key="no_data">
-        {this.loading ? ' ' : this.getNotFoundContent()}
+          <ul className={`${this.prefixCls}-menu`} style={{...{height: 'auto'},...dropdownMenuStyleMerge}}>
+            <li
+             className={`${this.prefixCls}-menu-item ${this.prefixCls}-menu-item-disabled`}
+            >
+               {this.loading ? ' ' : this.getNotFoundContent()}
+          </li>
+          </ul>
       </div>
-    );
+    )
   }
 
   // 遍历出父亲节点
@@ -638,8 +750,8 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
     if (this.multiple) {
       return [
         <div key="check-all" className={`${this.prefixCls}-select-all-none`}>
-          <span onClick={this.chooseAll}>{$l('Select', 'select_all')}</span>
-          <span onClick={this.unChooseAll}>{$l('Select', 'unselect_all')}</span>
+          <span onClick={this.chooseAll}>{$l('Cascader', 'select_all')}</span>
+          <span onClick={this.unChooseAll}>{$l('Cascader', 'unselect_all')}</span>
         </div>,
         menu,
       ];
@@ -824,7 +936,7 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
   handleKeyDownEnter(e) {
     if (this.popup && !this.editable) {
       const value = this.activeValue;
-      if (this.isSelected(value)) {
+      if (this.isSelected(value) && this.multiple) {
         this.unChoose(value);
       } else if (value.children) {
         this.setPopup(true);
@@ -899,7 +1011,7 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
   }
 
   findByText(text): Record | undefined {
-    const { textField } = this;
+    const { textField, props: { changeOnSelect } } = this;
     const findTreeItem = (options, valueItem, index) => {
       let sameItemTreeNode;
       if (valueItem.length > 0) {
@@ -907,7 +1019,7 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
           return isSameLike(this.getRecordOrObjValue(ele, textField), isPlainObject(valueItem[index]) ? ObjectChainValue.get(valueItem[index], textField) : valueItem[index]);
         });
         if (sameItemTreeNode) {
-          if (sameItemTreeNode.children) {
+          if (sameItemTreeNode.children && !(changeOnSelect && index === (valueItem.length - 1))) {
             return findTreeItem(sameItemTreeNode.children, valueItem, ++index);
           }
           return sameItemTreeNode;
@@ -925,7 +1037,7 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
 
 
   findByValue(value): Record | undefined {
-    const { valueField } = this;
+    const { valueField,props: { changeOnSelect } } = this;
     const findTreeItem = (options, valueItem, index) => {
       let sameItemTreeNode;
       if (valueItem.length > 0) {
@@ -933,7 +1045,7 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
           return isSameLike(this.getRecordOrObjValue(ele, valueField), isPlainObject(valueItem[index]) ? ObjectChainValue.get(valueItem[index], valueField) : valueItem[index]);
         });
         if (sameItemTreeNode) {
-          if (sameItemTreeNode.children) {
+          if (sameItemTreeNode.children && !(changeOnSelect && index === (valueItem.length - 1))) {
             return findTreeItem(sameItemTreeNode.children, valueItem, ++index);
           }
           return sameItemTreeNode;
@@ -942,7 +1054,7 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
     };
     value = getSimpleValue(value, valueField);
     if (this.options instanceof DataSet) {
-      return findTreeItem(this.options.treeData, value, 0);
+      return findTreeItem(toJS(this.options.treeData), toJS(value), 0);
     }
     return findTreeItem(this.options, value, 0);
   }
@@ -996,25 +1108,60 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
   handlePopupAnimateEnd(_key, _exists) {
   }
 
-  // 触发下拉框的点击事件
+  // 触发下拉框的点击事件,增加了触发方式判断优化trigger类型
   @autobind
-  handleMenuClick(targetOption) {
-
+  handleMenuClick(targetOption, _menuIndex, isClickTab, trigger) {
+    const { onChoose, onUnChoose, changeOnSelect } = this.props;
     if (!targetOption || targetOption.disabled) {
       return;
     }
-    if (!this.isSelected(targetOption.value)) {
+    if (!this.isSelected(targetOption.value) || isClickTab || !this.multiple) {
       if (targetOption.children) {
         this.setPopup(true);
         this.setActiveValue(targetOption.value);
+        this.setIsClickTab(isClickTab);
+        if( changeOnSelect && ExpandTrigger.click === trigger) {
+          this.choose(targetOption.value);
+        }
+        if(onChoose){
+          onChoose(
+            this.processRecordToObject(targetOption.value),
+            targetOption.value,
+          )
+        }
       } else {
-        this.choose(targetOption.value);
-        this.setActiveValue(targetOption.value);
+        if(!isClickTab){
+          this.setActiveValue(targetOption.value);
+          this.choose(targetOption.value);
+          if(onChoose){
+            onChoose(
+              this.processRecordToObject(targetOption.value),
+              targetOption.value,
+            )
+          }
+        }else{
+          this.setPopup(true);
+        }
+        this.setIsClickTab(isClickTab);
       }
     } else {
+      this.setactiveEmpty()
       this.unChoose(targetOption.value);
+      if(onUnChoose){
+        onUnChoose(
+          this.processRecordToObject(targetOption.value),
+          targetOption.value,
+        )
+      }
     }
+  }
 
+  setactiveEmpty(){
+    if(this.multiple){
+      this.setActiveValue([])
+    }else{
+      this.setActiveValue({})
+    }
   }
 
   handleOptionSelect(record: Record) {
@@ -1186,6 +1333,7 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
   @action
   clear() {
     this.setText(undefined);
+    this.setActiveValue({});
     super.clear();
   }
 
@@ -1263,6 +1411,7 @@ export class Cascader<T extends CascaderProps> extends TriggerField<T> {
 
   @autobind
   async handlePopupHiddenChange(hidden: boolean) {
+    this.setIsClickTab(false);
     if (!hidden) {
       this.forcePopupAlign();
     }

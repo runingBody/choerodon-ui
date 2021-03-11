@@ -40,6 +40,7 @@ exports[`Tree-pro should have a Tooltip inside 1`] = `
 >
   <div
     className="c7n-pro-upload"
+    style={Object {}}
   >
     <div
       className="flex-wrapper"
@@ -49,7 +50,6 @@ exports[`Tree-pro should have a Tooltip inside 1`] = `
       >
         <Button
           key="upload-btn"
-          loading={false}
           onClick={[Function]}
           suffixCls="btn"
           type="button"
@@ -141,6 +141,8 @@ exports[`Tree-pro should have a Tooltip inside 1`] = `
           noValidate={false}
           onBlur={[Function]}
           onChange={[Function]}
+          onCompositionEnd={[Function]}
+          onCompositionStart={[Function]}
           onFocus={[Function]}
           onKeyDown={[Function]}
           type="file"
@@ -428,7 +430,6 @@ exports[`Tree-pro should have a Tooltip inside 1`] = `
               <Button
                 color="primary"
                 key=".0"
-                loading={false}
                 onBlur={[Function]}
                 onClick={[Function]}
                 onContextMenu={[Function]}

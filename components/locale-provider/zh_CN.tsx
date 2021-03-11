@@ -2,6 +2,7 @@ import Pagination from '../rc-components/pagination/locale/zh_CN';
 import DatePicker from '../date-picker/locale/zh_CN';
 import TimePicker from '../time-picker/locale/zh_CN';
 import Calendar from '../calendar/locale/zh_CN';
+import Cascader from '../rc-components/cascader/locale/zh_CN';
 
 export default {
   locale: 'zh-cn',
@@ -9,6 +10,7 @@ export default {
   DatePicker,
   TimePicker,
   Calendar,
+  Cascader,
   Table: {
     filterTitle: '筛选',
     filterConfirm: '确定',
@@ -43,5 +45,31 @@ export default {
     removeFile: '删除文件',
     uploadError: '上传错误',
     previewFile: '预览文件',
+  },
+  Collapse: {
+    fold: '收起',
+    unfold: '展开',
+  },
+  imageCrop: {
+    editImage: '编辑图片',
+    avatarUploadError: '头像上传失败',
+    avatarServerError: '服务器错误',
+    avatarUpload: '头像上传',
+    avatarReminder: '您可以在此裁剪、旋转图片，然后点击“保存”完成头像的修改',
+    preview: '预览',
+    reUpload: '重新上传',
+    imageTooLarge:'图片过大，请重新上传',
+    imageUploadError:'图片上传错误',
+    imageDragHere:'图片请拖拽到这里',
+    pleaseUpload: '请上传，小于',
+    uploadType:'文件类型为',
+    picture: '的图片',
+    cancelButton:'取消',
+    saveButton:'保存',
+    changeAvatar:'修改头像',
+  },
+  PerformanceTable: {
+    emptyMessage: '暂无数据',
+    loading: '加载中...',
   },
 };

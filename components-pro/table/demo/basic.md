@@ -22,9 +22,9 @@ import {
   SelectBox,
   Modal,
   Button,
-  notification,
   AutoComplete,
 } from 'choerodon-ui/pro';
+import moment from 'moment';
 
 const { Column } = Table;
 
@@ -106,12 +106,14 @@ class App extends React.Component {
 
   userDs = new DataSet({
     primaryKey: 'userid',
-    name: 'user',
     autoQuery: true,
+    exportMode:'client',
     pageSize: 5,
     transport: {
-      read: {
-        url: '/dataset/user/queries',
+      read({ params: { page, pagesize } }) {
+        return {
+          url: `/dataset/user/page/${pagesize}/${page}`,
+        };
       },
       create: {
         url: '/dataset/user/mutations',
@@ -143,11 +145,11 @@ class App extends React.Component {
     feedback: {
       loadSuccess(resp) {
         //  DataSet 查询成功的反馈 可以return 一个resp 来修改响应结果
-        notification.success({ message: 'query success!' });
-        console.log('resp', resp)
+        console.log('loadSuccess')
       },
     },
     queryFields: [
+      { name: 'enable', type: 'boolean', label: '是否开启' },
       { name: 'name', type: 'string', label: '姓名', defaultValue: 'Hugh' },
       { name: 'age', type: 'number', label: '年龄' },
       { name: 'code', type: 'object', label: '代码描述', lovCode: 'LOV_CODE' },
@@ -288,7 +290,7 @@ class App extends React.Component {
       { name: 'enable', type: 'boolean', label: '是否开启', unique: 'uniqueGroup' },
       { name: 'frozen', type: 'boolean', label: '是否冻结', trueValue: 'Y', falseValue: 'N' },
       { name: 'date.startDate', type: 'date', label: '开始日期', defaultValue: new Date() },
-      { name: 'date.endDate', type: 'time', range: true, label: '结束日期' },
+      { name: 'date.endDate', type: 'time', range: true, label: '结束日期', dynamicProps: { defaultValue: () => [moment(), moment()] } },
     ],
     events: {
       selectAll: ({ dataSet }) => console.log('select all', dataSet.selected),
@@ -406,13 +408,8 @@ class App extends React.Component {
         autoMaxWidth={true}
         header="User"
         style={{ height: 200 }}
-        onRow={({ dataSet, record, index, expandedRow }) => {
-          if (index === 2) {
-            return {
-              style: { height: 50 },
-            };
-          }
-        }}
+        rowNumber
+        parityRow
       >
         <Column
           name="userid"

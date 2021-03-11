@@ -12,9 +12,9 @@ import Icon from '../icon';
 import FormContext from '../form/FormContext';
 import Progress from '../progress';
 import Ripple from '../ripple';
-import { ButtonColor, ButtonType, ButtonWaitType, FuncType } from './enum';
+import { ButtonColor, ButtonType, FuncType } from './enum';
 import { DataSetStatus } from '../data-set/enum';
-import { Size } from '../core/enum';
+import { WaitType, Size } from '../core/enum';
 import DataSetComponent, { DataSetComponentProps } from '../data-set/DataSetComponent';
 import autobind from '../_util/autobind';
 
@@ -58,7 +58,7 @@ export interface ButtonProps extends DataSetComponentProps {
    * 点击间隔类型，可选值：throttle | debounce
    * @default throttle
    */
-  waitType?: ButtonWaitType;
+  waitType?: WaitType;
 }
 
 @observer
@@ -66,7 +66,7 @@ export default class Button extends DataSetComponent<ButtonProps> {
   static displayName = 'Button';
 
   // eslint-disable-next-line camelcase
-  static __Pro_BUTTON = true;
+  static __PRO_BUTTON = true;
 
   static contextType = FormContext;
 
@@ -119,15 +119,14 @@ export default class Button extends DataSetComponent<ButtonProps> {
      * 点击间隔类型，可选值：throttle | debounce
      * @default throttle
      */
-    waitType: PropTypes.oneOf([ButtonWaitType.throttle, ButtonWaitType.debounce]),
+    waitType: PropTypes.oneOf([WaitType.throttle, WaitType.debounce]),
     ...DataSetComponent.propTypes,
   };
 
   static defaultProps = {
     suffixCls: 'btn',
     type: ButtonType.button,
-    loading: false,
-    waitType: ButtonWaitType.throttle,
+    waitType: WaitType.throttle,
   };
 
   @computed
@@ -153,15 +152,27 @@ export default class Button extends DataSetComponent<ButtonProps> {
   }
 
   getObservableProps(props, context) {
+    let loading = false;
+    if ('loading' in props) {
+      loading = props.loading;
+    }
     return {
+      ...super.getObservableProps(props, context),
       dataSet: 'dataSet' in props ? props.dataSet : context.dataSet,
-      loading: props.loading,
+      loading,
       type: props.type,
     };
   }
 
   componentWillReceiveProps(nextProps, nextContext) {
-    super.componentWillReceiveProps(nextProps, nextContext);
+    let loading = this.loading;
+    if ('loading' in nextProps) {
+      loading = nextProps.loading;
+    }
+    super.componentWillReceiveProps({
+      ...nextProps,
+      loading,
+    }, nextContext);
     const { wait, waitType } = this.props;
     if (wait !== nextProps.wait || waitType !== nextProps.waitType) {
       this.handleClickWait = this.getHandleClick(nextProps);
@@ -176,10 +187,10 @@ export default class Button extends DataSetComponent<ButtonProps> {
     const { wait, waitType } = props;
     if (wait && waitType) {
       const options: DebounceSettings = { leading: true, trailing: true };
-      if (waitType === ButtonWaitType.throttle) {
+      if (waitType === WaitType.throttle) {
         options.trailing = false;
         options.maxWait = wait;
-      } else if (waitType === ButtonWaitType.debounce) {
+      } else if (waitType === WaitType.debounce) {
         options.leading = false;
       }
       return debounce(this.handleClick, wait, options);
@@ -214,7 +225,7 @@ export default class Button extends DataSetComponent<ButtonProps> {
     }
   }
 
-  isDisabled() {
+  isDisabled(): boolean {
     const { disabled } = this.context;
     return disabled || super.isDisabled() || this.loading;
   }
@@ -251,7 +262,7 @@ export default class Button extends DataSetComponent<ButtonProps> {
         [`${prefixCls}-${color}`]: color,
         [`${prefixCls}-icon-only`]: icon
           ? childrenCount === 0 || children === false
-          : childrenCount === 1 && (children as any).type === Icon,
+          : childrenCount === 1 && (children as any).type && (children as any).type.__C7N_ICON,
       },
       ...props,
     );

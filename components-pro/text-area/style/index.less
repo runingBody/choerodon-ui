@@ -4,6 +4,7 @@
 @textarea-prefix: ~'@{c7n-pro-prefix}-textarea';
 
 .@{textarea-prefix} {
+  min-height: .35rem;
   .input;
 
   &,
@@ -11,7 +12,37 @@
     padding: @input-padding-horizontal;
   }
 
+  &-invalid&-wrapper {
+    background-color: transparent;
+  }
+
+  &-required {
+    background-color: transparent;
+
+    & .@{textarea-prefix} {
+      background-color: @input-required-bg;
+    }
+
+    & .@{textarea-prefix}:disabled {
+      background-color: @input-disabled-bg;
+    }
+  }
+
+  &-invalid {
+    & .@{textarea-prefix} {
+      background-color: @error-bg-color;
+    }
+  }
+
   &-invalid& {
     border-color: @error-color;
+  }
+
+  &-float-label&-required {
+    background-color: transparent;
+
+    & .@{textarea-prefix} {
+      background-color: transparent;
+    }
   }
 }

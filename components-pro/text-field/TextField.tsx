@@ -1,27 +1,36 @@
 import React, { createElement, CSSProperties, isValidElement, ReactNode } from 'react';
+import { Cancelable, DebounceSettings } from 'lodash';
 import omit from 'lodash/omit';
 import defer from 'lodash/defer';
 import isArray from 'lodash/isArray';
 import isString from 'lodash/isString';
+import isNil from 'lodash/isNil';
 import noop from 'lodash/noop';
+import debounce from 'lodash/debounce';
+import isArrayLike from 'lodash/isArrayLike';
 import classNames from 'classnames';
 import PropTypes from 'prop-types';
 import { action, observable } from 'mobx';
 import { observer } from 'mobx-react';
 import KeyCode from 'choerodon-ui/lib/_util/KeyCode';
 import { pxToRem, toPx } from 'choerodon-ui/lib/_util/UnitConvertor';
+import { getConfig } from 'choerodon-ui/lib/configure';
+import { WaitType } from '../core/enum';
 import { FormField, FormFieldProps } from '../field/FormField';
 import autobind from '../_util/autobind';
 import isEmpty from '../_util/isEmpty';
+import isIE from '../_util/isIE';
 import Icon from '../icon';
 import { ValidatorProps } from '../validator/rules';
 import { preventDefault, stopPropagation } from '../_util/EventManager';
 import measureTextWidth from '../_util/measureTextWidth';
 import Animate from '../animate';
 import Tooltip from '../tooltip/Tooltip';
-import { GroupItemCategory } from './enum';
+import { GroupItemCategory, ValueChangeAction } from './enum';
 import { ShowHelp } from '../field/enum';
 import { FieldFormat } from '../data-set/enum';
+import { LabelLayout } from '../form/interface';
+import { getProperty } from '../form/utils';
 
 let PLACEHOLDER_SUPPORT;
 
@@ -80,6 +89,23 @@ export interface TextFieldProps extends FormFieldProps {
    * 限制可输入的字符
    */
   restrict?: string;
+  /**
+   * 是否是筛选条 flat 模式
+   */
+  isFlat?: boolean;
+  /**
+   * 触发值变更的动作， default: blur
+   */
+  valueChangeAction?: ValueChangeAction;
+  /**
+   * 值变更间隔时间，只有在valueChangeAction为input时起作用
+   */
+  wait?: number;
+  /**
+   * 值变更间隔类型，可选值：throttle | debounce
+   * @default throttle
+   */
+  waitType?: WaitType;
 }
 
 export class TextField<T extends TextFieldProps> extends FormField<T> {
@@ -130,15 +156,33 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
      * 限制可输入的字符
      */
     restrict: PropTypes.string,
+    /**
+     * 是否是筛选条 flat 模式
+     */
+    isFlat: PropTypes.bool,
+    /**
+     * 触发值变更的动作， default: blur
+     */
+    valueChangeAction: PropTypes.oneOf([ValueChangeAction.input, ValueChangeAction.blur]),
+    /**
+     * 值变更间隔时间，只有在valueChangeAction为input时起作用
+     */
+    wait: PropTypes.number,
+    /**
+     * 值变更间隔类型，可选值：throttle | debounce
+     * @default throttle
+     */
+    waitType: PropTypes.oneOf([WaitType.throttle, WaitType.debounce]),
     ...FormField.propTypes,
   };
 
   static defaultProps = {
     ...FormField.defaultProps,
     suffixCls: 'input',
-    autoComplete: 'off',
     clearButton: false,
     multiple: false,
+    valueChangeAction: ValueChangeAction.blur,
+    waitType: WaitType.debounce,
   };
 
   @observable text?: string;
@@ -147,13 +191,49 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
 
   tagContainer: HTMLUListElement | null;
 
+  handleChangeWait: Function & Cancelable;
+
+  constructor(props, context) {
+    super(props, context);
+    this.handleChangeWait = this.getHandleChange(props);
+  }
+
+
+  componentWillReceiveProps(nextProps, nextContext) {
+    super.componentWillReceiveProps(nextProps, nextContext);
+    const { wait, waitType } = this.props;
+    if (wait !== nextProps.wait || waitType !== nextProps.waitType) {
+      this.handleChangeWait = this.getHandleChange(nextProps);
+    }
+  }
+
+  componentWillUnmount() {
+    super.componentWillUnmount();
+    this.handleChangeWait.cancel();
+  }
+
+
   @autobind
   saveTagContainer(node) {
     this.tagContainer = node;
   }
 
   isEmpty() {
-    return isEmpty(this.text) && super.isEmpty();
+    const result = isEmpty(this.text) && super.isEmpty();
+    if (this.range === true) {
+      if (this.value && isArrayLike(this.value) && !this.value.find(v => v)) {
+        return true;
+      }
+      return result;
+    }
+
+    if (isArrayLike(this.range)) {
+      if (this.value && !Object.values(this.value).find(v => v)) {
+        return true;
+      }
+      return result;
+    }
+    return result;
   }
 
   getOtherProps() {
@@ -167,10 +247,16 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
       'placeholder',
       'placeHolder',
       'maxLengths',
+      'autoComplete',
+      'isFlat',
+      'valueChangeAction',
+      'wait',
+      'waitType',
     ]);
     otherProps.type = this.type;
     otherProps.maxLength = this.getProp('maxLength');
     otherProps.onKeyDown = this.handleKeyDown;
+    otherProps.autoComplete = this.props.autoComplete || getConfig('textFieldAutoComplete') || 'off';
     return otherProps;
   }
 
@@ -207,6 +293,7 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
   }
 
   renderInputElement(): ReactNode {
+    const { addonBefore, addonAfter } = this.props;
     const input = this.getWrappedEditor();
     const button = this.getInnerSpanButton();
     const suffix = this.getSuffix();
@@ -217,23 +304,43 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
     const renderedValue = this.renderRenderedValue();
     const floatLabel = this.renderFloatLabel();
     const multipleHolder = this.renderMultipleHolder();
+    const wrapperProps = this.getWrapperProps();
 
-    return (
-      <span key="element" {...this.getWrapperProps()}>
+    // 修复设置宽度导致拥有addon出现宽度超出
+    if (addonAfter || addonBefore) {
+      wrapperProps.style = omit(wrapperProps.style, 'width');
+    }
+
+    // 修复ie下出现多层model导致的输入框遮盖问题
+    // fixed the input would shadow each other in ie brower
+    const ZIndexOfIEProps: { style: CSSProperties } | {} = isIE() ? { style: { zIndex: 'auto' } } : {};
+
+    const element = (
+      <span key="element" {...wrapperProps}>
         {multipleHolder}
         {otherPrevNode}
         {placeholderDiv}
         {renderedValue}
-        <label onMouseDown={this.handleMouseDown}>
+        <label {...ZIndexOfIEProps} onMouseDown={this.handleMouseDown}>
           {prefix}
           {input}
           {floatLabel}
           {button}
           {suffix}
         </label>
-        {otherNextNode}
       </span>
     );
+
+    if (otherNextNode) {
+      return (
+        <>
+          {element}
+          {otherNextNode}
+        </>
+      );
+    }
+
+    return element;
   }
 
   renderGroup(): ReactNode {
@@ -272,8 +379,12 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
     );
   }
 
+  // 处理 form 中的 labelLayout 为 placeholder 情况避免以前 placeholder 和 label 无法区分彼此。
   getPlaceholders(): string[] {
-    const { placeholder } = this.props;
+    const { dataSet, record, props, labelLayout } = this;
+    const placeholderOrigin = this.getProp('placeholder');
+    const label = getProperty(props, 'label', dataSet, record);
+    const placeholder = label && labelLayout === LabelLayout.placeholder && !this.isFocused ? label : placeholderOrigin || label ;
     const holders: string[] = [];
     return placeholder ? holders.concat(placeholder!) : holders;
   }
@@ -324,17 +435,17 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
             rangeTarget === undefined || !this.isFocused
               ? ''
               : this.text === undefined
-                ? rangeTarget === 0
-                  ? startValue
-                  : endValue
-                : this.text
+              ? rangeTarget === 0
+                ? startValue
+                : endValue
+              : this.text
           }
           placeholder={
             rangeTarget === undefined || !this.isFocused
               ? ''
               : rangeTarget === 0
-                ? startPlaceholder
-                : endPlaceHolder
+              ? startPlaceholder
+              : endPlaceHolder
           }
           readOnly={this.isReadOnly()}
           style={editorStyle}
@@ -402,39 +513,67 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
     );
   }
 
+  /**
+   * 处理 flat 多选tooltip text
+   */
+  getMultipleText() {
+    const values = this.getValues();
+    const repeats: Map<any, number> = new Map<any, number>();
+    const texts = values.map((v) => {
+      const key = this.getValueKey(v);
+      const repeat = repeats.get(key) || 0;
+      const text = this.processText(this.getText(v));
+      repeats.set(key, repeat + 1);
+      if (!isNil(text)) {
+        return text;
+      }
+      return undefined;
+    });
+    return texts.join('、');
+  }
+
   getEditor(): ReactNode {
     const {
       prefixCls,
       multiple,
       range,
-      props: { style },
+      props: { style, isFlat, clearButton },
     } = this;
     const otherProps = this.getOtherProps();
     const { height } = (style || {}) as CSSProperties;
     if (multiple) {
+      const tags = (
+        <Animate
+          component="ul"
+          componentProps={{
+            ref: this.saveTagContainer,
+            onScroll: stopPropagation,
+            style:
+              height && height !== 'auto' ? { height: pxToRem(toPx(height)! - 2) } : undefined,
+          }}
+          transitionName="zoom"
+          exclusive
+          onEnd={this.handleTagAnimateEnd}
+          onEnter={this.handleTagAnimateEnter}
+        >
+          {this.renderMultipleValues()}
+          {range
+            ? this.renderRangeEditor(otherProps)
+            : this.renderMultipleEditor({
+              ...otherProps,
+              className: `${prefixCls}-multiple-input`,
+            } as T)}
+        </Animate>
+      );
       return (
         <div key="text" className={otherProps.className}>
-          <Animate
-            component="ul"
-            componentProps={{
-              ref: this.saveTagContainer,
-              onScroll: stopPropagation,
-              style:
-                height && height !== 'auto' ? { height: pxToRem(toPx(height)! - 2) } : undefined,
-            }}
-            transitionName="zoom"
-            exclusive
-            onEnd={this.handleTagAnimateEnd}
-            onEnter={this.handleTagAnimateEnter}
-          >
-            {this.renderMultipleValues()}
-            {range
-              ? this.renderRangeEditor(otherProps)
-              : this.renderMultipleEditor({
-                ...otherProps,
-                className: `${prefixCls}-multiple-input`,
-              } as T)}
-          </Animate>
+          {
+            isFlat ? (
+              <Tooltip title={this.getMultipleText()}>
+                {tags}
+              </Tooltip>
+            ) : tags
+          }
         </div>
       );
     }
@@ -446,15 +585,31 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
       );
     }
     const text = this.getTextNode();
+    const placeholder = this.hasFloatLabel ? undefined : this.getPlaceholders()[0];
+    const finalText = isString(text) ? text : this.getText(this.getValue());
+
+    let width = 0;
+    // 筛选条默认宽度处理
+    if (isFlat) {
+      const hasValue = this.getValue() !== undefined && this.getValue() !== null;
+      width = hasValue ? measureTextWidth(finalText) + (clearButton ? 37 : 21) : measureTextWidth(placeholder || '') + 24;
+    }
+
     if (isValidElement(text)) {
-      otherProps.style = { ...otherProps.style, textIndent: -1000 };
+      otherProps.style = {
+        ...otherProps.style,
+        textIndent: -1000,
+        width: isFlat ? width : 'auto',
+      };
+    } else if (isFlat) {
+      otherProps.style = { width, ...otherProps.style };
     }
     return (
       <input
         key="text"
         {...otherProps}
-        placeholder={this.hasFloatLabel ? undefined : this.getPlaceholders()[0]}
-        value={isString(text) ? text : this.getText(this.getValue())}
+        placeholder={placeholder}
+        value={finalText}
         readOnly={!this.editable}
       />
     );
@@ -504,7 +659,13 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
   }
 
   renderMultipleHolder() {
-    const { name, multiple } = this;
+    const { name, multiple, props: { isFlat } } = this;
+    let width: string | number = 'auto';
+    if (isFlat) {
+      const hasValue = !this.isEmpty();
+      const placeholder = this.hasFloatLabel ? undefined : this.getPlaceholders()[0];
+      width = hasValue ? 'auto' : measureTextWidth(placeholder || '') + 22;
+    }
     if (multiple) {
       return (
         <input
@@ -513,6 +674,7 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
           value={this.toValueString(this.getValue()) || ''}
           name={name}
           onChange={noop}
+          style={{ width: isFlat ? width : 'auto' }}
         />
       );
     }
@@ -556,14 +718,14 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
 
   getInnerSpanButton(): ReactNode {
     const {
-      props: { clearButton },
+      props: { clearButton, isFlat },
       prefixCls,
     } = this;
     if (clearButton && !this.isReadOnly()) {
       return this.wrapperInnerSpanButton(
         <Icon type="close" onClick={this.handleClearButtonClick} />,
         {
-          className: `${prefixCls}-clear-button`,
+          className: isFlat ? `${prefixCls}-clear-button ${prefixCls}-clear-button-flat` : `${prefixCls}-clear-button`,
         },
       );
     }
@@ -593,19 +755,20 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
     this.afterRemoveValue(value, -1);
   }
 
-  handleTagAnimateEnd() { }
+  handleTagAnimateEnd() {
+  }
 
   @autobind
   handleTagAnimateEnter() {
     const { tagContainer } = this;
     const { style } = this.props;
     if (tagContainer && style && style.height) {
-      if(tagContainer.scrollTo){
+      if (tagContainer.scrollTo) {
         tagContainer.scrollTo(0, tagContainer.getBoundingClientRect().height);
-      }else{
-        tagContainer.scrollTop = tagContainer.getBoundingClientRect().height
+      } else {
+        tagContainer.scrollTop = tagContainer.getBoundingClientRect().height;
       }
-      
+
     }
   }
 
@@ -662,6 +825,13 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
             break;
           default:
         }
+      }
+    } else if (isIE()) {
+      /**
+       * 修复ie出现点击backSpace的页面回到上一页问题
+       */
+      if (e.keyCode === KeyCode.BACKSPACE) {
+        e.preventDefault();
       }
     }
     super.handleKeyDown(e);
@@ -723,19 +893,51 @@ export class TextField<T extends TextFieldProps> extends FormField<T> {
     }
   }
 
+  getHandleChange(props): Function & Cancelable {
+    const { wait, waitType } = props;
+    if (wait && waitType) {
+      const options: DebounceSettings = { leading: true, trailing: true };
+      if (waitType === WaitType.throttle) {
+        options.trailing = false;
+        options.maxWait = wait;
+      } else if (waitType === WaitType.debounce) {
+        options.leading = false;
+      }
+      return debounce(this.prepareSetValue, wait, options);
+    }
+    return debounce(this.prepareSetValue, 0);
+  }
+
+
   @autobind
   handleChange(e) {
     const {
       target,
+      type,
       target: { value },
     } = e;
-    const restricted = this.restrictInput(value);
-    if (restricted !== value) {
-      const selectionEnd = target.selectionEnd + restricted.length - value.length;
-      target.value = restricted;
-      target.setSelectionRange(selectionEnd, selectionEnd);
+    const { valueChangeAction } = this.props;
+    if (type === 'compositionend') {
+      this.lock = false;
     }
-    this.setText(restricted);
+
+    if (!this.lock) {
+      const restricted = this.restrictInput(value);
+      if (restricted !== value) {
+        const selectionEnd = target.selectionEnd + restricted.length - value.length;
+        target.value = restricted;
+        target.setSelectionRange(selectionEnd, selectionEnd);
+      }
+      this.setText(restricted);
+      if (valueChangeAction === ValueChangeAction.input) {
+        this.handleChangeWait(restricted);
+      }
+    } else {
+      this.setText(value);
+      if (valueChangeAction === ValueChangeAction.input) {
+        this.handleChangeWait(value);
+      }
+    }
   }
 
   restrictInput(value: string): string {

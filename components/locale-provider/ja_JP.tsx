@@ -2,6 +2,7 @@ import Pagination from '../rc-components/pagination/locale/ja_JP';
 import DatePicker from '../date-picker/locale/ja_JP';
 import TimePicker from '../time-picker/locale/ja_JP';
 import Calendar from '../calendar/locale/ja_JP';
+import Cascader from '../rc-components/cascader/locale/ja_JP';
 
 export default {
   locale: 'ja',
@@ -9,6 +10,7 @@ export default {
   DatePicker,
   TimePicker,
   Calendar,
+  Cascader,
   Table: {
     filterTitle: 'メニューをフィルター',
     filterConfirm: 'OK',
@@ -40,5 +42,9 @@ export default {
     removeFile: 'ファイルを削除',
     uploadError: 'アップロードエラー',
     previewFile: 'ファイルをプレビュー',
+  },
+  Collapse: {
+    fold: '折る',
+    unfold: '展開する',
   },
 };

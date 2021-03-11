@@ -18,6 +18,7 @@ export interface Locale {
     expand_button;
     collapse_button;
     export_button;
+    more_button;
     advanced_search;
     dirty_info;
     restore;
@@ -27,6 +28,27 @@ export interface Locale {
     filter_bar_placeholder;
     advanced_query;
     advanced_query_conditions;
+    max_export;
+    more;
+    enter_text_filter;
+    clear_filter;
+    save_filter;
+    collapse;
+    predefined_fields;
+    add_filter;
+    enter_search_content;
+    save_as;
+    fast_filter;
+    rename;
+    set_default;
+    cancel_default;
+    filter_rename;
+    save_filter_as;
+    whether_delete_filter;
+    filter_name;
+    please_enter;
+    query_option_yes;
+    query_option_no;
   };
   Pagination: {
     page;
@@ -93,7 +115,9 @@ export interface Locale {
     value_missing_no_label;
     no_matching_results;
     select_all;
+    select_re;
     unselect_all;
+    common_item;
   };
   Lov: {
     choose;
@@ -136,6 +160,21 @@ export interface Locale {
     other;
     series;
   };
+  Cascader:{
+    please_select;
+    value_missing_no_label;
+    value_missing;
+    select_all;
+    unselect_all;
+  };
+  Screening:{
+    selected;
+    pack_up;
+    more;
+    multi_select;
+    confirm;
+    cancel;
+  }
 }
 
 export default zh_CN;

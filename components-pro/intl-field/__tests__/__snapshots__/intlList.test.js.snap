@@ -48,7 +48,6 @@ exports[`IntlList-pro renders IntlField correctly 1`] = `
                   className="c7n-pro-field-wrapper"
                 >
                   <TextField
-                    autoComplete="off"
                     autoFocus={false}
                     className="c7n-pro-field"
                     clearButton={false}
@@ -357,6 +356,8 @@ exports[`IntlList-pro renders IntlField correctly 1`] = `
                                 noValidate={false}
                                 onBlur={[Function]}
                                 onChange={[Function]}
+                                onCompositionEnd={[Function]}
+                                onCompositionStart={[Function]}
                                 onFocus={[Function]}
                                 onKeyDown={[Function]}
                                 readOnly={false}
@@ -439,7 +440,6 @@ exports[`IntlList-pro renders IntlField correctly 1`] = `
                   className="c7n-pro-field-wrapper"
                 >
                   <TextField
-                    autoComplete="off"
                     autoFocus={false}
                     className="c7n-pro-field"
                     clearButton={false}
@@ -748,6 +748,8 @@ exports[`IntlList-pro renders IntlField correctly 1`] = `
                                 noValidate={false}
                                 onBlur={[Function]}
                                 onChange={[Function]}
+                                onCompositionEnd={[Function]}
+                                onCompositionStart={[Function]}
                                 onFocus={[Function]}
                                 onKeyDown={[Function]}
                                 readOnly={false}
@@ -830,7 +832,6 @@ exports[`IntlList-pro renders IntlField correctly 1`] = `
                   className="c7n-pro-field-wrapper"
                 >
                   <TextField
-                    autoComplete="off"
                     autoFocus={false}
                     className="c7n-pro-field"
                     clearButton={false}
@@ -1139,6 +1140,8 @@ exports[`IntlList-pro renders IntlField correctly 1`] = `
                                 noValidate={false}
                                 onBlur={[Function]}
                                 onChange={[Function]}
+                                onCompositionEnd={[Function]}
+                                onCompositionStart={[Function]}
                                 onFocus={[Function]}
                                 onKeyDown={[Function]}
                                 readOnly={false}

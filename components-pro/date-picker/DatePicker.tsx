@@ -7,7 +7,7 @@ import isNil from 'lodash/isNil';
 import omit from 'lodash/omit';
 import noop from 'lodash/noop';
 import { observer } from 'mobx-react';
-import { action, computed, isArrayLike, observable, runInAction,toJS } from 'mobx';
+import { action, computed, isArrayLike, observable, runInAction, toJS } from 'mobx';
 import KeyCode from 'choerodon-ui/lib/_util/KeyCode';
 import warning from 'choerodon-ui/lib/_util/warning';
 import TriggerField, { TriggerFieldProps } from '../trigger-field/TriggerField';
@@ -27,6 +27,7 @@ import { $l } from '../locale-context';
 import { ValidatorProps } from '../validator/rules';
 import isSame from '../_util/isSame';
 import formatString from '../formatter/formatString';
+import Field from '../data-set/Field';
 
 export type RenderFunction = (
   props: object,
@@ -39,9 +40,9 @@ export type TimeStep = {
   hour?: number;
   minute?: number;
   second?: number;
-}
+};
 
-const viewComponents: { [x: string]: typeof DaysView } = {
+const viewComponents: { [x: string]: typeof DaysView; } = {
   [ViewMode.decade]: DecadeYearsView,
   [ViewMode.year]: YearsView,
   [ViewMode.month]: MonthsView,
@@ -64,6 +65,9 @@ export interface DatePickerProps extends TriggerFieldProps {
   min?: MomentInput | null;
   max?: MomentInput | null;
   step?: TimeStep;
+  renderExtraFooter?: () => ReactNode;
+  extraFooterPlacement?: 'top' | 'bottom';
+
 }
 
 export interface DatePickerKeyboardEvent {
@@ -168,7 +172,7 @@ export default class DatePicker extends TriggerField<DatePickerProps>
   @computed
   get editable(): boolean {
     const mode = this.getViewMode();
-    return mode !== ViewMode.week;
+    return super.editable && mode !== ViewMode.week;
   }
 
   @computed
@@ -212,6 +216,8 @@ export default class DatePicker extends TriggerField<DatePickerProps>
       isValidDate: this.isValidDate,
       format: this.getDateFormat(),
       step: this.getProp('step') || {},
+      renderExtraFooter: this.getProp('renderExtraFooter'),
+      extraFooterPlacement: this.getProp('extraFooterPlacement') || 'bottom',
     } as DateViewProps);
   }
 
@@ -233,19 +239,26 @@ export default class DatePicker extends TriggerField<DatePickerProps>
     return mode;
   }
 
-  checkMoment(item) {
-    if (!isNil(item) && !isMoment(item)) {
-      warning(false, `DatePicker: The value of DatePicker is not moment.`);
-      const format = this.getDateFormat();
-      if (item instanceof Date) {
-        item = moment(item).format(format);
-      }
-      return moment(item, format);
+  toMoment(item: Moment | Date | string | undefined, field: Field | undefined = this.field, noCheck = false): Moment | undefined {
+    if (isNil(item)) {
+      return undefined;
     }
-    return item;
+    if (isMoment(item)) {
+      return item;
+    }
+    warning(noCheck, `DatePicker: The value of DatePicker is not moment.`);
+    const format = this.getDateFormat(field);
+    if (item instanceof Date) {
+      item = moment(item).format(format);
+    }
+    return moment(item, format);
   }
 
- // 避免出现影响过多组件使用继承覆盖原有方法 Fix onchange moment use ValueOf to get the Timestamp compare
+  checkMoment(item) {
+    return this.toMoment(item);
+  }
+
+  // 避免出现影响过多组件使用继承覆盖原有方法 Fix onchange moment use ValueOf to get the Timestamp compare
   @action
   setValue(value: any): void {
     if (!this.isReadOnly()) {
@@ -284,11 +297,11 @@ export default class DatePicker extends TriggerField<DatePickerProps>
     this.setText(undefined);
   }
 
-  momentToTimestamp(value){
-    if(isMoment(value)) {
-      return moment(value).valueOf()
+  momentToTimestamp(value) {
+    if (isMoment(value)) {
+      return moment(value).valueOf();
     }
-    return value
+    return value;
   }
 
   // processValue(value: any): ReactNode {
@@ -307,18 +320,28 @@ export default class DatePicker extends TriggerField<DatePickerProps>
     return this.getValidDate(moment().startOf('d'));
   }
 
-  getLimit(minOrMax: 'min' | 'max') {
+  getLimit(minOrMax: 'min' | 'max'): Moment | undefined {
     const limit = this.getProp(minOrMax);
     if (!isNil(limit)) {
       const { record } = this;
-      if (record && isString(limit) && record.getField(limit)) {
-        return record.get(limit) ? this.getLimitWithType(moment(record.get(limit)), minOrMax) : record.get(limit);
+      if (record && isString(limit)) {
+        const field = record.getField(limit);
+        if (field) {
+          const value = record.get(limit);
+          if (value) {
+            const momentValue = this.toMoment(value, field, true);
+            if (momentValue) {
+              return this.getLimitWithType(momentValue, minOrMax);
+            }
+          }
+          return undefined;
+        }
       }
       return this.getLimitWithType(moment(limit), minOrMax);
     }
   }
 
-  getLimitWithType(limit: Moment, minOrMax: 'min' | 'max') {
+  getLimitWithType(limit: Moment, minOrMax: 'min' | 'max'): Moment {
     if (minOrMax === 'min') {
       return limit.startOf('d');
     }
@@ -357,11 +380,11 @@ export default class DatePicker extends TriggerField<DatePickerProps>
   }
 
   @autobind
-  handleSelect(date: Moment) {
+  handleSelect(date: Moment, expand?: boolean) {
     if (this.multiple && this.isSelected(date)) {
       this.unChoose(date);
     } else {
-      this.choose(date);
+      this.choose(date, expand);
     }
   }
 
@@ -535,14 +558,21 @@ export default class DatePicker extends TriggerField<DatePickerProps>
     this.removeValue(date, -1);
   }
 
-  choose(date: Moment) {
+  /**
+   *
+   * @param date 返回的时间
+   * @param expand 是否保持时间选择器的展开
+   */
+  choose(date: Moment, expand?: boolean) {
     date = this.getValidDate(date);
     this.prepareSetValue(date);
     this.changeSelectedDate(date);
     if (this.range ? this.rangeTarget === 1 : !this.multiple) {
-      this.collapse();
+      if (!expand) {
+        this.collapse();
+      }
     }
-    if (this.range && this.rangeTarget === 0 && this.popup) {
+    if (this.range && this.rangeTarget === 0 && this.popup && !expand) {
       this.setRangeTarget(1);
     }
   }

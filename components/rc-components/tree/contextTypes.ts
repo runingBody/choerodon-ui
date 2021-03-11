@@ -2,33 +2,66 @@
  * Webpack has bug for import loop, which is not the same behavior as ES module.
  * When util.js imports the TreeNode for tree generate will cause treeContextTypes be empty.
  */
-import * as React from 'react';
-import { IconType, Key, DataEntity, EventDataNode, NodeInstance } from './interface';
+import React from 'react';
+import { DataEntity, DataNode, Direction, EventDataNode, IconType, Key, NodeInstance } from './interface';
 
-type NodeMouseEventHandler = (e: React.MouseEvent<HTMLDivElement>, node: EventDataNode) => void;
-type NodeDragEventHandler = (e: React.MouseEvent<HTMLDivElement>, node: NodeInstance) => void;
+export type NodeMouseEventParams<T = HTMLSpanElement> = {
+  event: React.MouseEvent<T>;
+  node: EventDataNode;
+};
+export type NodeDragEventParams<T = HTMLDivElement> = {
+  event: React.MouseEvent<T>;
+  node: EventDataNode;
+};
+
+export type NodeMouseEventHandler<T = HTMLSpanElement> = (
+  e: React.MouseEvent<T>,
+  node: EventDataNode,
+) => void;
+export type NodeDragEventHandler<T = HTMLDivElement> = (
+  e: React.MouseEvent<T>,
+  node: NodeInstance | null,
+  outsideTree?: boolean,
+) => void;
 
 export interface TreeContextProps {
   prefixCls: string;
-  selectable: boolean;
-  showIcon: boolean;
+  selectable?: boolean;
+  showIcon?: boolean;
   icon: IconType;
   switcherIcon: IconType;
-  draggable: boolean;
+  draggable?: ((node?: DataNode) => boolean) | boolean;
   checkable: boolean | React.ReactNode;
-  checkStrictly: boolean;
-  disabled: boolean;
+  checkStrictly?: boolean;
+  disabled?: boolean;
   keyEntities: Record<Key, DataEntity>;
+  // for details see comment in Tree.state (Tree.tsx)
+  dropLevelOffset?: number | null;
+  dropContainerKey: Key | null;
+  dropTargetKey: Key | null;
+  dropPosition: -1 | 0 | 1 | null;
+  indent: number | null;
+  dropIndicatorRender?: (props: {
+    dropPosition: -1 | 0 | 1 | null;
+    dropLevelOffset: number | undefined | null;
+    indent: number | null;
+    prefixCls: string;
+    direction: Direction;
+  }) => React.ReactNode;
+  dragOverNodeKey: Key | null;
+  direction: Direction;
 
-  loadData: (treeNode: EventDataNode) => Promise<void>;
-  filterTreeNode: (treeNode: EventDataNode) => boolean;
+  loadData?: (treeNode: EventDataNode) => Promise<void>;
+  filterTreeNode?: (treeNode: EventDataNode) => boolean;
+  titleRender?: (node?: DataNode) => React.ReactNode;
+  ripple?: boolean;
 
   onNodeClick: NodeMouseEventHandler;
   onNodeDoubleClick: NodeMouseEventHandler;
   onNodeExpand: NodeMouseEventHandler;
   onNodeSelect: NodeMouseEventHandler;
   onNodeCheck: (
-    e: React.MouseEvent<HTMLDivElement>,
+    e: React.MouseEvent<HTMLSpanElement>,
     treeNode: EventDataNode,
     checked: boolean,
   ) => void;
@@ -43,5 +76,5 @@ export interface TreeContextProps {
   onNodeDragEnd: NodeDragEventHandler;
   onNodeDrop: NodeDragEventHandler;
 }
-// @ts-ignore
-export const TreeContext: React.Context<TreeContextProps | null> = React.createContext(null);
+
+export const TreeContext: React.Context<TreeContextProps> = React.createContext<TreeContextProps>({} as TreeContextProps);

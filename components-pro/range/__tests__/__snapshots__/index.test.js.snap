@@ -2,7 +2,6 @@
 
 exports[`Range should show tooltip when hovering range handler 1`] = `
 <Range
-  autoComplete="off"
   clearButton={false}
   dataSet={
     DataSet {
@@ -446,6 +445,8 @@ exports[`Range should show tooltip when hovering range handler 1`] = `
             noValidate={false}
             onBlur={[Function]}
             onChange={[Function]}
+            onCompositionEnd={[Function]}
+            onCompositionStart={[Function]}
             onFocus={[Function]}
             onKeyDown={[Function]}
             step={1}
@@ -537,7 +538,6 @@ exports[`Range should show tooltip when hovering range handler 1`] = `
 
 exports[`Range should show tooltip when hovering range handler 2`] = `
 <Range
-  autoComplete="off"
   clearButton={false}
   dataSet={
     DataSet {
@@ -981,6 +981,8 @@ exports[`Range should show tooltip when hovering range handler 2`] = `
             noValidate={false}
             onBlur={[Function]}
             onChange={[Function]}
+            onCompositionEnd={[Function]}
+            onCompositionStart={[Function]}
             onFocus={[Function]}
             onKeyDown={[Function]}
             step={1}
@@ -1072,7 +1074,6 @@ exports[`Range should show tooltip when hovering range handler 2`] = `
 
 exports[`Range the range drag test  1`] = `
 <Range
-  autoComplete="off"
   clearButton={false}
   dataSet={
     DataSet {
@@ -1516,6 +1517,8 @@ exports[`Range the range drag test  1`] = `
             noValidate={false}
             onBlur={[Function]}
             onChange={[Function]}
+            onCompositionEnd={[Function]}
+            onCompositionStart={[Function]}
             onFocus={[Function]}
             onKeyDown={[Function]}
             step={1}

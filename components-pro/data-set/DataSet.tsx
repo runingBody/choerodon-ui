@@ -1,16 +1,7 @@
 import { ReactNode } from 'react';
-import {
-  action,
-  computed,
-  get,
-  IReactionDisposer,
-  isArrayLike,
-  observable,
-  runInAction,
-  set,
-  toJS,
-} from 'mobx';
+import { action, computed, get, IReactionDisposer, isArrayLike, observable, runInAction, set, toJS } from 'mobx';
 import axiosStatic, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import unionBy from 'lodash/unionBy';
 import omit from 'lodash/omit';
 import flatMap from 'lodash/flatMap';
 import isNumber from 'lodash/isNumber';
@@ -21,43 +12,39 @@ import defer from 'lodash/defer';
 import debounce from 'lodash/debounce';
 import warning from 'choerodon-ui/lib/_util/warning';
 import { getConfig } from 'choerodon-ui/lib/configure';
+import XLSX from 'xlsx';
 import localeContext, { $l } from '../locale-context';
 import axios from '../axios';
 import Record from './Record';
 import Field, { FieldProps, Fields } from './Field';
 import {
   adapterDataToJSON,
+  arrayMove,
   axiosConfigAdapter,
   checkParentByInsert,
   doExport,
   findBindFieldBy,
+  findRootParent,
   generateData,
   generateJSONData,
   generateResponseData,
   getFieldSorter,
   getOrderFields,
+  getSplitValue,
   isDirtyRecord,
   prepareForSubmit,
   prepareSubmitData,
+  processExportValue,
   processIntlField,
+  sliceTree,
   sortTree,
   useCascade,
   useSelected,
-  sliceTree,
-  findRootParent,
 } from './utils';
 import EventManager from '../_util/EventManager';
 import DataSetSnapshot from './DataSetSnapshot';
 import confirm from '../modal/confirm';
-import {
-  DataSetEvents,
-  DataSetSelection,
-  DataSetStatus,
-  DataToJSON,
-  FieldType,
-  RecordStatus,
-  SortOrder,
-} from './enum';
+import { DataSetEvents, DataSetSelection, DataSetStatus, DataToJSON, ExportMode, FieldType, RecordStatus, SortOrder } from './enum';
 import { Lang } from '../locale-context/enum';
 import isEmpty from '../_util/isEmpty';
 import * as ObjectChainValue from '../_util/ObjectChainValue';
@@ -67,6 +54,24 @@ import { ModalProps } from '../modal/Modal';
 import { confirmProps } from '../modal/utils';
 import DataSetRequestError from './DataSetRequestError';
 import defaultFeedback, { FeedBack } from './FeedBack';
+
+function getSpliceRecord(records: Record[], inserts: Record[], fromRecord?: Record): Record | undefined {
+  if (fromRecord) {
+    if (inserts.includes(fromRecord)) {
+      return getSpliceRecord(records, inserts, records[records.indexOf(fromRecord) + 1]);
+    }
+    return fromRecord;
+  }
+}
+
+// bugs in react native
+function fixAxiosConfig(config: AxiosRequestConfig): AxiosRequestConfig {
+  const { method } = config;
+  if (method && method.toLowerCase() === 'get') {
+    delete config.data;
+  }
+  return config;
+}
 
 export type DataSetChildren = { [key: string]: DataSet };
 
@@ -138,6 +143,11 @@ export interface DataSetProps {
    */
   autoLocateAfterRemove?: boolean;
   /**
+   * 查询时是否校验查询字段或查询数据集
+   * @default false;
+   */
+  validateBeforeQuery?: boolean;
+  /**
    * 选择的模式
    * @default "multiple"
    */
@@ -199,6 +209,10 @@ export interface DataSetProps {
    * 导出请求的url
    */
   exportUrl?: string;
+  /**
+   * 导出模式
+   */
+  exportMode?: ExportMode;
   /**
    * 自定义CRUD的请求配置
    */
@@ -268,6 +282,7 @@ export default class DataSet extends EventManager {
     autoLocateFirst: true,
     autoLocateAfterCreate: true,
     autoLocateAfterRemove: true,
+    validateBeforeQuery: true,
     selection: DataSetSelection.multiple,
     modifiedCheck: true,
     pageSize: 10,
@@ -320,6 +335,15 @@ export default class DataSet extends EventManager {
   @observable cachedSelected: Record[];
 
   @observable dataToJSON: DataToJSON;
+
+  @computed
+  get cascadeRecords(): Record[] {
+    const { parent, parentName } = this;
+    if (parent && parentName) {
+      return parent.cascadeRecords.reduce<Record[]>((array, record) => array.concat(...(record.getCascadeRecordsIncludeDelete(parentName) || [])), []);
+    }
+    return this.records;
+  }
 
   @computed
   get axios(): AxiosInstance {
@@ -452,6 +476,13 @@ export default class DataSet extends EventManager {
     });
   }
 
+  /**
+   * 服务端导出还是客户端导出
+   */
+  get exportMode(): ExportMode {
+    return this.props.exportMode || getConfig('exportMode') || ExportMode.server;
+  }
+
   set transport(transport: Transport) {
     runInAction(() => {
       this.props.transport = transport instanceof Transport ? transport.props : transport;
@@ -485,7 +516,7 @@ export default class DataSet extends EventManager {
     const created: Record[] = [];
     const updated: Record[] = [];
     const destroyed: Record[] = [];
-    this.records.forEach(record => {
+    this.all.forEach(record => {
       switch (record.status) {
         case RecordStatus.add:
           created.push(record);
@@ -560,15 +591,9 @@ export default class DataSet extends EventManager {
     if (current) {
       const index = this.indexOf(current);
       if (index !== -1) {
-        if(this.paging === 'server'){
-          const currentParent = findRootParent(current)
-          let parentIndex = -1
-          this.treeData.forEach((item,indexTree) => {
-            if(this.indexOf(item) === this.indexOf(currentParent)){
-              parentIndex = indexTree;
-            }
-          })
-          return parentIndex;
+        if (this.paging === 'server') {
+          const currentParent = findRootParent(current);
+          return this.treeData.findIndex((item) => item.index === currentParent.index);
         }
         return index + (currentPage - 1) * pageSize;
       }
@@ -605,7 +630,7 @@ export default class DataSet extends EventManager {
   @computed
   get paging(): boolean | 'server' {
     const { idField, parentField, paging } = this.props;
-    return (paging === `server`)&&parentField&&idField ? paging : (parentField === undefined || idField === undefined) && !!paging! ;
+    return (paging === `server`) && parentField && idField ? paging : (parentField === undefined || idField === undefined) && !!paging!;
   }
 
   set paging(paging) {
@@ -791,15 +816,18 @@ export default class DataSet extends EventManager {
   }
 
   toData(): object[] {
-    return generateData(this).data;
+    return generateData(this.records).data;
   }
 
+  /**
+   * 对应参数后续会废弃
+   * @param isSelected
+   * @param noCascade
+   */
   toJSONData(isSelected?: boolean, noCascade?: boolean): object[] {
-    const dataToJSON = adapterDataToJSON(isSelected, noCascade);
-    if (dataToJSON) {
-      this.dataToJSON = dataToJSON;
-    }
-    return generateJSONData(this).data;
+    const dataToJSON = adapterDataToJSON(isSelected, noCascade) || this.dataToJSON;
+    const records = useSelected(dataToJSON) ? this.selected : this.records;
+    return generateJSONData(this, records).data;
   }
 
   /**
@@ -819,33 +847,48 @@ export default class DataSet extends EventManager {
   /**
    * 查询记录
    * @param page 页码
+   * @param params 查询参数
    * @return Promise
    */
-  query(page?: number): Promise<any> {
-    return this.pending.add(this.doQuery(page));
+  query(page?: number, params?: object): Promise<any> {
+    return this.pending.add(this.doQuery(page, params));
   }
 
-  async doQuery(page): Promise<any> {
-    const data = await this.read(page);
+  /**
+   * 查询更多记录，查询到的结果会拼接到原有数据之后
+   * @param page 页码
+   * @param params 查询参数
+   * @return Promise
+   */
+  queryMore(page?: number, params?: object): Promise<any> {
+    return this.pending.add(this.doQueryMore(page, params));
+  }
+
+  async doQuery(page, params?: object): Promise<any> {
+    const data = await this.read(page, params);
     this.loadDataFromResponse(data);
     return data;
   }
 
+  async doQueryMore(page, params?: object): Promise<any> {
+    const data = await this.read(page, params);
+    this.appendDataFromResponse(data);
+    return data;
+  }
+
   /**
+   * TODO 参数废弃
    * 将数据集中的增删改的记录进行远程提交
    * @param isSelect 如果为true，则只提交选中记录
    * @param noCascade 如果为true，则不提交级联数据
    * @return Promise
    */
   async submit(isSelect?: boolean, noCascade?: boolean): Promise<any> {
-    const dataToJSON = adapterDataToJSON(isSelect, noCascade);
-    if (dataToJSON) {
-      this.dataToJSON = dataToJSON;
-    }
+    const dataToJSON = adapterDataToJSON(isSelect, noCascade) || this.dataToJSON;
     await this.ready();
     if (await this.validate()) {
       return this.pending.add(
-        this.write(useSelected(this.dataToJSON) ? this.selected : this.records),
+        this.write(useSelected(dataToJSON) ? this.selected : this.records),
       );
     }
     return false;
@@ -854,8 +897,9 @@ export default class DataSet extends EventManager {
   /**
    * 导出数据
    * @param object columns 导出的列
+   * @param number exportQuantity 导出数量
    */
-  async export(columns: any = {}): Promise<void> {
+  async export(columns: any = {}, exportQuantity: number = 0): Promise<void> {
     if (this.checkReadable(this.parent) && (await this.ready())) {
       const data = await this.generateQueryParameter();
       data._HAP_EXCEL_EXPORT_COLUMNS = columns;
@@ -871,12 +915,54 @@ export default class DataSet extends EventManager {
             data: newConfig.data,
           })) !== false
         ) {
-          doExport(this.axios.getUri(newConfig), newConfig.data, newConfig.method);
+          const ExportQuantity = exportQuantity > 1000 ? 1000 : exportQuantity;
+          if (this.exportMode === ExportMode.client) {
+            this.doClientExport(data, ExportQuantity);
+          } else {
+            doExport(this.axios.getUri(newConfig), newConfig.data, newConfig.method);
+          }
         }
       } else {
         warning(false, 'Unable to execute the export method of dataset, please check the ');
       }
     }
+  }
+
+  private async doClientExport(data: any, quantity: number) {
+    const columnsExport = data._HAP_EXCEL_EXPORT_COLUMNS;
+    delete data._HAP_EXCEL_EXPORT_COLUMNS;
+    const params = { ...this.generateQueryString(1, quantity) };
+    const newConfig = axiosConfigAdapter('read', this, data, params);
+    const result = await this.axios(newConfig);
+    const newResult: any[] = [];
+    if (result[this.dataKey] && result[this.dataKey].length > 0) {
+      const processData = toJS(this.processData(result[this.dataKey])).map((item) => item.data);
+      processData.forEach((itemValue) => {
+        const dataItem = {};
+        const columnsExportkeys = Object.keys(columnsExport);
+        for (let i = 0; i < columnsExportkeys.length; i += 1) {
+          const firstRecord = this.records[0] || this;
+          const exportField = firstRecord.getField(columnsExportkeys[i]);
+          let processItemValue = getSplitValue(toJS(itemValue), columnsExportkeys[i]);
+          // 处理bind 情况
+          if (exportField && isNil(processItemValue) && exportField.get('bind')) {
+            processItemValue = getSplitValue(
+              getSplitValue(toJS(itemValue), exportField.get('bind')),
+              columnsExportkeys[i],
+              true,
+            );
+
+          }
+          dataItem[columnsExportkeys[i]] = processExportValue(processItemValue, exportField);
+        }
+        newResult.push(dataItem);
+      });
+    }
+    newResult.unshift(columnsExport);
+    const ws = XLSX.utils.json_to_sheet(newResult, { skipHeader: true }); /* 新建空workbook，然后加入worksheet */
+    const wb = XLSX.utils.book_new();  /* 新建book */
+    XLSX.utils.book_append_sheet(wb, ws); /* 生成xlsx文件(book,sheet数据,sheet命名) */
+    XLSX.writeFile(wb, `${this.name}.xlsx`); /* 写文件(book,xlsx文件名称) */
   }
 
   /**
@@ -917,12 +1003,12 @@ export default class DataSet extends EventManager {
     const { paging, pageSize, totalCount } = this;
     const { modifiedCheck, modifiedCheckMessage, autoLocateFirst } = this.props;
     let currentRecord = this.findInAllPage(index);
-    if (currentRecord ) {
+    if (currentRecord) {
       this.current = currentRecord;
       return currentRecord;
     }
     if (paging === true || paging === 'server') {
-      if (index >= 0 && index < totalCount + this.created.length - this.destroyed.length ) {
+      if (index >= 0 && index < totalCount + this.created.length - this.destroyed.length) {
         if (
           !modifiedCheck ||
           !this.dirty ||
@@ -931,7 +1017,7 @@ export default class DataSet extends EventManager {
           await this.query(Math.floor(index / pageSize) + 1);
           currentRecord = this.findInAllPage(index);
           if (currentRecord) {
-            this.current = autoLocateFirst ? currentRecord: undefined;
+            this.current = autoLocateFirst ? currentRecord : undefined;
             return currentRecord;
           }
         }
@@ -1013,18 +1099,19 @@ export default class DataSet extends EventManager {
    * @param dataIndex 记录所在的索引
    * @return 新建的记录
    */
+  @action
   create(data: object = {}, dataIndex?: number): Record {
     if (data === null) {
       data = {};
     }
-    [...this.fields.entries()].forEach(([name, field]) => {
+    const record = new Record(data, this);
+    [...record.fields.entries()].forEach(([name, field]) => {
       const defaultValue = field.get('defaultValue');
       const value = ObjectChainValue.get(data, name);
       if (value === undefined && defaultValue !== undefined) {
-        ObjectChainValue.set(data, name, toJS(defaultValue));
+        record.init(name, toJS(defaultValue));
       }
     });
-    const record = new Record(data, this);
     if (isNumber(dataIndex)) {
       this.splice(dataIndex, 0, record);
     } else {
@@ -1052,10 +1139,10 @@ export default class DataSet extends EventManager {
       if (
         records.length > 0 &&
         (await this.fireEvent(DataSetEvents.beforeDelete, { dataSet: this, records })) !== false &&
-        (await confirm(confirmMessage || $l('DataSet', 'delete_selected_row_confirm'))) !== 'cancel'
+        (confirmMessage === false || (await confirm(confirmMessage && confirmMessage !== true ? confirmMessage : $l('DataSet', 'delete_selected_row_confirm'))) !== 'cancel')
       ) {
         this.remove(records);
-        return this.pending.add(this.write(this.destroyed));
+        return this.pending.add(this.write(this.destroyed, true));
       }
     }
   }
@@ -1068,7 +1155,7 @@ export default class DataSet extends EventManager {
   remove(records?: Record | Record[]): void {
     if (records) {
       const data = isArrayLike(records) ? records.slice() : [records];
-      if (data.length) {
+      if (data.length && this.fireEventSync(DataSetEvents.beforeRemove, { dataSet: this, records: data }) !== false) {
         const { current } = this;
         data.forEach(this.deleteRecord, this);
         this.fireEvent(DataSetEvents.remove, { dataSet: this, records: data });
@@ -1111,10 +1198,10 @@ export default class DataSet extends EventManager {
   async deleteAll(confirmMessage?: ReactNode | ModalProps & confirmProps) {
     if (
       this.records.length > 0 &&
-      (await confirm(confirmMessage || $l('DataSet', 'delete_all_row_confirm'))) !== 'cancel'
+      (confirmMessage === false || (await confirm(confirmMessage && confirmMessage !== true ? confirmMessage : $l('DataSet', 'delete_all_row_confirm'))) !== 'cancel')
     ) {
       this.removeAll();
-      return this.pending.add(this.write(this.destroyed));
+      return this.pending.add(this.write(this.destroyed, true));
     }
   }
 
@@ -1174,14 +1261,22 @@ export default class DataSet extends EventManager {
     if (items.length) {
       checkParentByInsert(this);
       const { records } = this;
+      const spliceRecord = getSpliceRecord(records, items, fromRecord);
       const transformedRecords = this.transferRecords(items);
-      if (fromRecord) {
-        records.splice(records.indexOf(fromRecord), 0, ...transformedRecords);
+      if (spliceRecord) {
+        records.splice(records.indexOf(spliceRecord), 0, ...transformedRecords);
       } else {
         records.push(...transformedRecords);
       }
     }
     return deleted;
+  }
+
+  /**
+   * 切换记录的顺序
+   */
+  move(from: number, to: number) {
+    arrayMove(this.records, from, to);
   }
 
   /**
@@ -1309,6 +1404,7 @@ export default class DataSet extends EventManager {
 
   /**
    * 服务端排序
+   * 排序新增加中间态
    * @param fieldName
    */
   @action
@@ -1321,12 +1417,17 @@ export default class DataSet extends EventManager {
           current.order = undefined;
         }
       });
-      if (!field.order || field.order === SortOrder.desc) {
-        field.order = SortOrder.asc;
-      } else {
-        field.order = SortOrder.desc;
+      switch (field.order) {
+        case SortOrder.asc:
+          field.order = SortOrder.desc;
+          break;
+        case SortOrder.desc:
+          field.order = undefined;
+          break;
+        default:
+          field.order = SortOrder.asc;
       }
-      if (this.paging) {
+      if (this.paging || !field.order) {
         this.query();
       } else {
         this.records = this.records.sort(getFieldSorter(field));
@@ -1484,23 +1585,24 @@ export default class DataSet extends EventManager {
   }
 
   /**
-   * 校验数据记录是否有效
+   * 校验数据记录是否有效 对应参数后续会废弃
    * @param isSelected 是否只校验选中记录
    * @param noCascade 是否级联校验
    * @return true | false
    */
   validate(isSelected?: boolean, noCascade?: boolean): Promise<boolean> {
-    const dataToJSON = adapterDataToJSON(isSelected, noCascade);
-    if (dataToJSON) {
-      this.dataToJSON = dataToJSON;
-    }
+    const dataToJSON = adapterDataToJSON(isSelected, noCascade) || this.dataToJSON;
     const cascade =
-      noCascade === undefined && this.dataToJSON ? useCascade(this.dataToJSON) : !noCascade;
-    return Promise.all(
-      (useSelected(this.dataToJSON) ? this.selected : this.data).map(record =>
+      noCascade === undefined && dataToJSON ? useCascade(dataToJSON) : !noCascade;
+    const validateResult = Promise.all(
+      (useSelected(dataToJSON) ? this.selected : this.data).map(record =>
         record.validate(false, !cascade),
       ),
     ).then(results => results.every(result => result));
+
+    this.fireEvent(DataSetEvents.validate, { dataSet: this, result: validateResult });
+
+    return validateResult;
   }
 
   /**
@@ -1520,7 +1622,7 @@ export default class DataSet extends EventManager {
    */
   getGroups(): string[] {
     return [...this.fields.entries()]
-      .reduce((arr: string[], [name, field]) => {
+      .reduce<string[]>((arr, [name, field]) => {
         const group = field.get('group');
         if (isNumber(group)) {
           arr[group as number] = name;
@@ -1567,7 +1669,7 @@ export default class DataSet extends EventManager {
   }
 
   @action
-  commitData(allData: any[], total?: number): DataSet {
+  commitData(allData: any[], total?: number, onlyDelete?: boolean): DataSet {
     const { autoQueryAfterSubmit, primaryKey } = this.props;
     if (this.dataToJSON === DataToJSON.normal) {
       flatMap(this.dirtyRecords).forEach(record =>
@@ -1585,8 +1687,8 @@ export default class DataSet extends EventManager {
         const record = data.__id
           ? this.findRecordById(data.__id)
           : primaryKey &&
-            dataStatus !== status[RecordStatus.add] &&
-            this.records.find(r => r.get(primaryKey) === data[primaryKey]);
+          dataStatus !== status[RecordStatus.add] &&
+          this.records.find(r => r.get(primaryKey) === data[primaryKey]);
         if (record) {
           record.commit(data, this);
         } else if (dataStatus === status[RecordStatus.add]) {
@@ -1607,6 +1709,8 @@ export default class DataSet extends EventManager {
       // 剩下未回写的非新增数据使用原数据进行回写
       if (restUpdatedData.length === updated.length) {
         updated.forEach((r, index) => r.commit(restUpdatedData[index], this));
+      } else if (onlyDelete) {
+        updated.forEach(r => r.commit(r.toData(), this));
       } else {
         updated.forEach(r => r.commit(omit(r.toData(), ['__dirty']), this));
       }
@@ -1667,6 +1771,21 @@ Then the query method will be auto invoke.`,
   }
 
   @action
+  appendData(allData: (object | Record)[] = []): DataSet {
+    const {
+      paging,
+      pageSize,
+    } = this;
+    allData = paging ? allData.slice(0, pageSize) : allData;
+    this.fireEvent(DataSetEvents.beforeAppend, { dataSet: this, data: allData });
+    const appendData = this.processData(allData);
+    this.originalData = unionBy(this.originalData, appendData, 'key');
+    this.records = unionBy(this.records, appendData, 'key');
+    this.fireEvent(DataSetEvents.append, { dataSet: this });
+    return this;
+  }
+
+  @action
   loadData(allData: (object | Record)[] = [], total?: number): DataSet {
     this.storeSelected();
     const {
@@ -1674,12 +1793,12 @@ Then the query method will be auto invoke.`,
       pageSize,
       props: { autoLocateFirst, idField, parentField },
     } = this;
-    switch(paging){
+    switch (paging) {
       case true:
         allData = allData.slice(0, pageSize);
-      break;
+        break;
       case 'server':
-        allData = idField && parentField ? sliceTree(idField,parentField,allData,pageSize) : allData.slice(0, pageSize);
+        allData = idField && parentField ? sliceTree(idField, parentField, allData, pageSize) : allData.slice(0, pageSize);
         break;
       default:
         break;
@@ -1689,12 +1808,12 @@ Then the query method will be auto invoke.`,
     this.records = this.originalData;
     if (total !== undefined && (paging === true || paging === 'server')) {
       this.totalCount = total;
-    }else if(idField && parentField && paging === 'server'){
+    } else if (idField && parentField && paging === 'server') {
       // 异步情况复用以前的total
-      if(!this.totalCount){
-        this.totalCount = this.treeData.length
+      if (!this.totalCount) {
+        this.totalCount = this.treeData.length;
       }
-    } else{
+    } else {
       this.totalCount = allData.length;
     }
     this.releaseCachedSelected();
@@ -1711,8 +1830,14 @@ Then the query method will be auto invoke.`,
   @action
   processData(allData: any[]): Record[] {
     return allData.map(data => {
-      const record =
-        data instanceof Record ? ((data.dataSet = this), data) : new Record(data, this);
+      if (data instanceof Record) {
+        if (data.dataSet !== this) {
+          data.dataSet = this;
+          data.status = RecordStatus.sync;
+        }
+        return data;
+      }
+      const record = new Record(data, this);
       record.status = RecordStatus.sync;
       return record;
     });
@@ -1727,12 +1852,12 @@ Then the query method will be auto invoke.`,
       if (selectedIndex !== -1) {
         selected.splice(selectedIndex, 1);
       }
-      if (record.status === RecordStatus.add) {
+      if (record.isNew) {
         const index = records.indexOf(record);
         if (index !== -1) {
           records.splice(index, 1);
         }
-      } else if (record.status !== RecordStatus.delete) {
+      } else if (!record.isRemoved) {
         record.status = RecordStatus.delete;
       }
     }
@@ -1742,14 +1867,14 @@ Then the query method will be auto invoke.`,
   // 查询在所有页面的对应位置
   private findInAllPage(index: number): Record | undefined {
     const { paging } = this;
-    let indexRecord
-    if (paging === true ) {
+    let indexRecord;
+    if (paging === true) {
       indexRecord = this.data[this.getIndexInCurrentPage(index)];
-    }else if(paging === 'server'){
-      indexRecord  = this.treeData[this.getIndexInCurrentPage(index)];
-    }else{
-      indexRecord = this.data[index]
-    };
+    } else if (paging === 'server') {
+      indexRecord = this.treeData[this.getIndexInCurrentPage(index)];
+    } else {
+      indexRecord = this.data[index];
+    }
     return indexRecord;
   }
 
@@ -1828,6 +1953,16 @@ Then the query method will be auto invoke.`,
     return this;
   }
 
+  private appendDataFromResponse(resp: any): DataSet {
+    if (resp) {
+      const { dataKey } = this;
+      const data: object[] = generateResponseData(resp, dataKey);
+      this.appendData(data);
+    }
+    return this;
+
+  }
+
   // private groupData(allData: object[]): object[] {
   //   return this.getGroups().reverse()
   //     .reduce((arr, name) => arr.sort(
@@ -1835,7 +1970,7 @@ Then the query method will be auto invoke.`,
   //     ), allData);
   // }
 
-  private async write(records: Record[]): Promise<any> {
+  private async write(records: Record[], onlyDelete?: boolean): Promise<any> {
     if (records.length) {
       const [created, updated, destroyed] = prepareSubmitData(records, this.dataToJSON);
       const axiosConfigs: AxiosRequestConfig[] = [];
@@ -1856,7 +1991,7 @@ Then the query method will be auto invoke.`,
             const result: any[] = await axiosStatic.all(
               axiosConfigs.map(config => this.axios(config)),
             );
-            return this.handleSubmitSuccess(result);
+            return this.handleSubmitSuccess(result, onlyDelete);
           }
         } catch (e) {
           this.handleSubmitFail(e);
@@ -1868,11 +2003,11 @@ Then the query method will be auto invoke.`,
     }
   }
 
-  private async read(page: number = 1): Promise<any> {
+  private async read(page: number = 1, params?: object): Promise<any> {
     if (this.checkReadable(this.parent)) {
       try {
         this.changeStatus(DataSetStatus.loading);
-        const data = await this.generateQueryParameter();
+        const data = await this.generateQueryParameter(params);
         const newConfig = axiosConfigAdapter('read', this, data, this.generateQueryString(page));
         if (newConfig.url) {
           const queryEventResult = await this.fireEvent(DataSetEvents.query, {
@@ -1881,9 +2016,11 @@ Then the query method will be auto invoke.`,
             data: newConfig.data,
           });
           if (queryEventResult) {
-            const result = await this.axios(newConfig);
+            const result = await this.axios(fixAxiosConfig(newConfig));
             runInAction(() => {
-              this.currentPage = page;
+              if (page >= 0) {
+                this.currentPage = page;
+              }
             });
             return this.handleLoadSuccess(result);
           }
@@ -1968,10 +2105,12 @@ Then the query method will be auto invoke.`,
     loadFailed(e);
   }
 
-  private handleSubmitSuccess(resp: any[]) {
+  private handleSubmitSuccess(resp: any[], onlyDelete?: boolean) {
     const { dataKey, totalKey } = this;
     const { submitSuccess = defaultFeedback.submitSuccess } = this.feedback;
-    const data: object[] = [];
+    const data: {
+      [props: string]: any
+    }[] = [];
     let total;
     resp.forEach(item => {
       data.push(...generateResponseData(item, dataKey));
@@ -1990,7 +2129,13 @@ Then the query method will be auto invoke.`,
       }
     }
     this.fireEvent(DataSetEvents.submitSuccess, { dataSet: this, data: result });
-    this.commitData(data, total);
+    // 针对 204 的情况进行特殊处理
+    // 不然在设置了 primaryKey 的情况 下,在先新增一条再使用delete的情况下，会将204这个请求内容填入到record中
+    if (!(data[0] && data[0].status === 204 && data[0].statusText === 'No Content')) {
+      this.commitData(data, total, onlyDelete);
+    } else {
+      this.commitData([], total);
+    }
     submitSuccess(result);
     return result;
   }
@@ -2049,13 +2194,13 @@ Then the query method will be auto invoke.`,
   ): boolean {
     const cascadeRecords = currentRecord.cascadeRecordsMap[childName];
     const childRecords = cascadeRecords || currentRecord.get(childName);
-    if (currentRecord.status === RecordStatus.add || isArrayLike(childRecords)) {
+    if (currentRecord.isNew || isArrayLike(childRecords)) {
       if (cascadeRecords) {
         delete currentRecord.cascadeRecordsMap[childName];
       }
       ds.clearCachedSelected();
       ds.loadData(childRecords ? childRecords.slice() : []);
-      if (currentRecord.status === RecordStatus.add) {
+      if (currentRecord.isNew) {
         if (ds.length) {
           ds.forEach(record => (record.status = RecordStatus.add));
         } else if (ds.props.autoCreate) {
@@ -2082,17 +2227,27 @@ Then the query method will be auto invoke.`,
   private checkReadable(parent) {
     if (parent) {
       const { current } = parent;
-      if (!current || current.status === RecordStatus.add) {
+      if (!current || current.isNew) {
         return false;
       }
     }
     return true;
   }
 
-  private generatePageQueryString(page: number) {
-    const { paging, pageSize } = this;
-    if (paging === true || paging === 'server') {
-      return { page, pagesize: pageSize };
+  /**
+   * page相关请求设置
+   * @param page 在那个页面, 小于0时不分页
+   * @param pageSizeInner 页面大小
+   */
+  private generatePageQueryString(page: number, pageSizeInner?: number): { page?: number, pagesize?: number | undefined } {
+    if (page >= 0) {
+      const { paging, pageSize } = this;
+      if (isNumber(pageSizeInner)) {
+        return { page, pagesize: pageSizeInner };
+      }
+      if (paging === true || paging === 'server') {
+        return { page, pagesize: pageSize };
+      }
     }
     return {};
   }
@@ -2113,9 +2268,14 @@ Then the query method will be auto invoke.`,
     return {};
   }
 
-  private generateQueryString(page: number) {
+  /**
+   * 返回configure 配置的值
+   * @param page 在那个页面, 小于0时不分页
+   * @param pageSizeInner 页面大小
+   */
+  private generateQueryString(page: number, pageSizeInner?: number) {
     const order = this.generateOrderQueryString();
-    const pageQuery = this.generatePageQueryString(page);
+    const pageQuery = this.generatePageQueryString(page, pageSizeInner);
     const generatePageQuery = getConfig('generatePageQuery');
     if (typeof generatePageQuery === 'function') {
       return generatePageQuery({
@@ -2145,12 +2305,12 @@ Then the query method will be auto invoke.`,
     return {};
   }
 
-  private async generateQueryParameter(): Promise<any> {
-    const { queryDataSet } = this;
+  private async generateQueryParameter(params?: object): Promise<any> {
+    const { queryDataSet, props: { validateBeforeQuery } } = this;
     const parentParams = this.getParentParams();
     if (queryDataSet) {
       await queryDataSet.ready();
-      if (!(await queryDataSet.validate())) {
+      if (validateBeforeQuery && !(await queryDataSet.validate())) {
         throw new Error($l('DataSet', 'invalid_query_dataset'));
       }
     }
@@ -2165,6 +2325,7 @@ Then the query method will be auto invoke.`,
       ...data,
       ...this.queryParameter,
       ...parentParams,
+      ...params,
     };
     return Object.keys(data).reduce((p, key) => {
       const value = data[key];

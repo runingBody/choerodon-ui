@@ -54,6 +54,12 @@ export class Radio<T extends RadioProps> extends FormField<T & RadioProps> {
     suffixCls: 'radio',
   };
 
+  // eslint-disable-next-line camelcase
+  static __PRO_RADIO = true;
+
+  // eslint-disable-next-line camelcase
+  static __IS_IN_CELL_EDITOR = true;
+
   type: string = 'radio';
 
   @computed
@@ -88,14 +94,24 @@ export class Radio<T extends RadioProps> extends FormField<T & RadioProps> {
   renderWrapper(): ReactNode {
     const checked = this.isChecked();
     return (
+      <>
       <label key="wrapper" {...this.getWrapperProps()}>
         <input {...this.getOtherProps()} checked={checked} value={this.checkedValue} />
         {this.renderInner()}
         {this.getTextNode()}
         {this.renderFloatLabel()}
       </label>
+      {super.hasFloatLabel ? this.renderSwitchFloatLabel(): undefined }
+      </>
     );
   }
+
+  /**
+   * 解决form 在float的时候没有表头的问题
+   * 也可以在需要不在组件内部展现label的时候使用
+   */
+  renderSwitchFloatLabel (): ReactNode | undefined { return undefined; }
+
 
   renderInner(): ReactNode {
     return <span className={`${this.prefixCls}-inner`} />;
@@ -192,4 +208,10 @@ export class Radio<T extends RadioProps> extends FormField<T & RadioProps> {
 @observer
 export default class ObserverRadio extends Radio<RadioProps> {
   static defaultProps = Radio.defaultProps;
+
+  // eslint-disable-next-line camelcase
+  static __PRO_RADIO = true;
+
+  // eslint-disable-next-line camelcase
+  static __IS_IN_CELL_EDITOR = true;
 }

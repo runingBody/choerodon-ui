@@ -10,6 +10,7 @@ import isPlainObject from 'lodash/isPlainObject';
 import { observer } from 'mobx-react';
 import { action, computed, IReactionDisposer, isArrayLike, reaction, runInAction } from 'mobx';
 import Menu, { Item, ItemGroup } from 'choerodon-ui/lib/rc-components/menu';
+import Tag from 'choerodon-ui/lib/tag';
 import KeyCode from 'choerodon-ui/lib/_util/KeyCode';
 import { pxToRem } from 'choerodon-ui/lib/_util/UnitConvertor';
 import { getConfig } from 'choerodon-ui/lib/configure';
@@ -18,6 +19,7 @@ import autobind from '../_util/autobind';
 import { ValidationMessages } from '../validator/Validator';
 import Option, { OptionProps } from '../option/Option';
 import OptGroup from '../option/OptGroup';
+import Icon from '../icon';
 import { DataSetStatus, FieldType } from '../data-set/enum';
 import DataSet from '../data-set/DataSet';
 import Record from '../data-set/Record';
@@ -30,6 +32,7 @@ import isEmpty from '../_util/isEmpty';
 import isSame from '../_util/isSame';
 import isSameLike from '../_util/isSameLike';
 import { Renderer } from '../field/FormField';
+import isIE from '../_util/isIE';
 
 function updateActiveKey(menu: Menu, activeKey: string) {
   const store = menu.getStore();
@@ -44,14 +47,15 @@ function updateActiveKey(menu: Menu, activeKey: string) {
 }
 
 function defaultSearchMatcher({ record, text, textField }) {
-  return record.get(textField).indexOf(text) !== -1;
+  return record.get(textField) && record.get(textField).indexOf(text) !== -1;
 }
 
-const disabledField = '__disabled';
+export const DISABLED_FIELD = '__disabled';
+export const MORE_KEY = '__more__';
 
 function defaultOnOption({ record }) {
   return {
-    disabled: record.get(disabledField),
+    disabled: record.get(DISABLED_FIELD),
   };
 }
 
@@ -78,12 +82,37 @@ export interface SearchMatcherProps {
   valueField: string;
 }
 
+export type ParamMatcher = string | ((props: ParamMatcherProps) => string);
+
+export interface ParamMatcherProps {
+  record: Record | undefined;
+  text: string;
+  textField: string;
+  valueField: string;
+}
+
 export interface SelectProps extends TriggerFieldProps {
   /**
    * 复合输入值
    * @default false
    */
   combo?: boolean;
+  /**
+   * 常用项
+   */
+  commonItem?: string[],
+  /**
+   * 常用项标签超出最大数量时的占位描述
+   */
+  maxCommonTagPlaceholder?: ReactNode | ((omittedValues: any[]) => ReactNode);
+  /**
+   * 常用项标签最大数量
+   */
+  maxCommonTagCount?: number;
+  /**
+   * 常用项标签文案最大长度
+   */
+  maxCommonTagTextLength?: number;
   /**
    * 可搜索
    * @default false
@@ -93,6 +122,10 @@ export interface SelectProps extends TriggerFieldProps {
    * 搜索匹配器。 当为字符串时，作为lookup的参数名来重新请求值列表。
    */
   searchMatcher?: SearchMatcher;
+  /**
+   * 参数匹配器。 当为字符串时，参数拼接。
+   */
+  paramMatcher?: ParamMatcher;
   /**
    * 选项过滤
    * @param {Record} record
@@ -109,6 +142,16 @@ export interface SelectProps extends TriggerFieldProps {
    * @default true
    */
   dropdownMatchSelectWidth?: boolean;
+  /**
+   * 多选时显示全选按钮;
+   * @default true
+   */
+  selectAllButton?: boolean;
+  /**
+   * 多选是否开启反选
+   * @default false
+   */
+  reverse?: boolean;
   /**
    * 下拉框菜单样式名
    */
@@ -142,6 +185,10 @@ export interface SelectProps extends TriggerFieldProps {
    * 设置选项属性，如 disabled;
    */
   onOption: (props: onOptionProps) => OptionProps;
+  /**
+   * 下拉时自动重新查询
+   */
+  noCache?: boolean;
 }
 
 export class Select<T extends SelectProps> extends TriggerField<T> {
@@ -154,6 +201,23 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
      */
     combo: PropTypes.bool,
     /**
+     * 常用项
+     * @default undefined
+     */
+    commonItem: PropTypes.array,
+    /**
+     * 多值标签超出最大数量时的占位描述
+     */
+    maxCommonTagPlaceholder: PropTypes.oneOfType([PropTypes.node, PropTypes.func]),
+    /**
+     * 多值标签最大数量
+     */
+    maxCommonTagCount: PropTypes.number,
+    /**
+     * 多值标签文案最大长度
+     */
+    maxCommonTagTextLength: PropTypes.number,
+    /**
      * 过滤器
      * @default false
      */
@@ -162,6 +226,10 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
      * 搜索匹配器。 当为字符串时，作为lookup的参数名来重新请求值列表。
      */
     searchMatcher: PropTypes.oneOfType([PropTypes.string, PropTypes.func]),
+    /**
+     * 参数匹配器。 当为字符串时，参数拼接。
+     */
+    paramMatcher: PropTypes.oneOfType([PropTypes.string, PropTypes.func]),
     /**
      * 是否为原始值
      * true - 选项中valueField对应的值
@@ -187,6 +255,25 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
      * 设置选项属性，如 disabled;
      */
     onOption: PropTypes.func,
+    /**
+     * 下拉时自动重新查询
+     */
+    noCache: PropTypes.bool,
+    /**
+     * 下拉框匹配输入框宽度
+     * @default true
+     */
+    dropdownMatchSelectWidth: PropTypes.bool,
+    /**
+     * 多选时显示全选按钮;
+     * @default true
+     */
+    selectAllButton: PropTypes.bool,
+    /**
+     * 多选是否开启反选
+     * @default false
+     */
+    reverse: PropTypes.bool,
     ...TriggerField.propTypes,
   };
 
@@ -197,11 +284,14 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     searchable: false,
     checkValueOnOptionsChange: true,
     onOption: defaultOnOption,
+    selectAllButton: true,
   };
 
   static Option = Option;
 
   static OptGroup = OptGroup;
+
+  static __PRO_SELECT = true;
 
   comboOptions: DataSet = new DataSet();
 
@@ -211,6 +301,12 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
   get searchMatcher(): SearchMatcher {
     const { searchMatcher = defaultSearchMatcher } = this.observableProps;
     return searchMatcher;
+  }
+
+  @computed
+  get paramMatcher(): ParamMatcher {
+    const { paramMatcher } = this.observableProps;
+    return paramMatcher;
   }
 
   @computed
@@ -235,9 +331,11 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     return this.comboOptions.filter(record => !this.isSelected(record))[0];
   }
 
+  @computed
   get filteredOptions(): Record[] {
-    const { optionsWithCombo, text } = this;
-    return this.filterData(optionsWithCombo, text);
+    const { text } = this;
+    const { optionsWithCombo, observableProps: { optionsFilter } } = this;
+    return this.searchData(optionsFilter ? optionsWithCombo.filter(optionsFilter) : optionsWithCombo, text);
   }
 
   @computed
@@ -274,7 +372,7 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
 
   @computed
   get searchable(): boolean {
-    return !!this.props.searchable;
+    return !!this.observableProps.searchable;
   }
 
   @computed
@@ -299,7 +397,7 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     return (
       options ||
       (field && field.options) ||
-      normalizeOptions({ textField, valueField, disabledField, multiple, children })
+      normalizeOptions({ textField, valueField, disabledField: DISABLED_FIELD, multiple, children })
     );
   }
 
@@ -395,7 +493,12 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     const otherProps = omit(super.getOtherProps(), [
       'searchable',
       'searchMatcher',
+      'paramMatcher',
       'combo',
+      'commonItem',
+      'maxCommonTagPlaceholder',
+      'maxCommonTagCount',
+      'maxCommonTagTextLength',
       'multiple',
       'value',
       'name',
@@ -408,6 +511,9 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
       'optionRenderer',
       'notFoundContent',
       'onOption',
+      'noCache',
+      'reverse',
+      'selectAllButton',
     ]);
     return otherProps;
   }
@@ -418,8 +524,14 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
       children: props.children,
       options: props.options,
       combo: props.combo,
+      commonItem: props.commonItem,
       primitiveValue: props.primitiveValue,
       searchMatcher: props.searchMatcher,
+      paramMatcher: props.paramMatcher,
+      searchable: props.searchable,
+      dropdownMatchSelectWidth: props.dropdownMatchSelectWidth,
+      selectReverse: props.reverse,
+      optionsFilter: props.optionsFilter,
     };
   }
 
@@ -451,13 +563,72 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     return getConfig('renderEmpty')('Select');
   }
 
+  getOtherNextNode(): ReactNode {
+    const {
+      options,
+      textField,
+      valueField,
+      observableProps: { commonItem },
+      props: { maxCommonTagCount, maxCommonTagPlaceholder, maxCommonTagTextLength },
+    } = this;
+    if (!options) {
+      return undefined;
+    }
+    const values = this.getValues();
+    if (commonItem) {
+      const valueLength = commonItem.length;
+      const tags = commonItem.slice(0, maxCommonTagCount).map((item) => {
+        let text = item;
+        let textRecord: Record;
+        options.map((record) => {
+          if (record.get(valueField) === item) {
+            text = maxCommonTagTextLength &&
+            isString(record.get(textField)) &&
+            record.get(textField).length > maxCommonTagTextLength
+              ? `${record.get(textField).slice(0, maxCommonTagTextLength)}...`
+              : record.get(textField);
+            textRecord = record;
+          }
+          return null;
+        });
+        return (<Tag
+          key={item}
+          className={values.includes(item) ? `${this.prefixCls}-common-item ${this.prefixCls}-common-item-selected` : `${this.prefixCls}-common-item`}
+          // @ts-ignore
+          onClick={() => this.handleCommonItemClick(textRecord)}
+        >
+          {text}
+        </Tag>);
+      });
+      if (valueLength > maxCommonTagCount) {
+        let content: ReactNode = `+ ${valueLength - Number(maxCommonTagCount)} ...`;
+        if (maxCommonTagPlaceholder) {
+          const omittedValues = commonItem.slice(maxCommonTagCount, valueLength);
+          content =
+            typeof maxCommonTagPlaceholder === 'function'
+              ? maxCommonTagPlaceholder(omittedValues)
+              : maxCommonTagPlaceholder;
+        }
+        tags.push(
+          <Tag className={`${this.prefixCls}-common-item`} key="maxCommonTagPlaceholder">
+            {content}
+          </Tag>,
+        );
+      }
+      return (<div className={`${this.prefixCls}-common-item-wrapper`}>
+        <span className={`${this.prefixCls}-common-item-label`}>{$l('Select', 'common_item')}</span>
+        {tags}
+      </div>);
+    }
+  }
+
   @autobind
   getMenu(menuProps: object = {}): ReactNode {
     const {
       options,
       textField,
       valueField,
-      props: { dropdownMenuStyle, optionRenderer, onOption, dropdownMatchSelectWidth = getConfig('dropdownMatchSelectWidth') },
+      props: { dropdownMenuStyle, optionRenderer, onOption },
     } = this;
     if (!options) {
       return null;
@@ -466,7 +637,11 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     const groups = options.getGroups();
     const optGroups: ReactElement<any>[] = [];
     const selectedKeys: Key[] = [];
-    let overflowYAdd = {}
+    /**
+     * fixed when ie the scroll width would cover the item width
+     */
+    const IeMenuStyle = !this.dropdownMatchSelectWidth && isIE() ? { padding: '.08rem' } : {};
+    const IeItemStyle = !this.dropdownMatchSelectWidth && isIE() ? { overflow: 'visible' } : {};
     this.filteredOptions.forEach(record => {
       let previousGroup: ReactElement<any> | undefined;
       groups.every(field => {
@@ -507,10 +682,10 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
         selectedKeys.push(key);
       }
       const itemContent = optionRenderer
-        ? optionRenderer({ dataSet: this.options, record, text, value })
+        ? optionRenderer({ dataSet: options, record, text, value })
         : text;
       const option: ReactElement = (
-        <Item {...optionProps} key={key} value={record} disabled={optionDisabled}>
+        <Item style={IeItemStyle} {...optionProps} key={key} value={record} disabled={optionDisabled}>
           {itemContent}
         </Item>
       );
@@ -523,18 +698,12 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     });
     if (!optGroups.length) {
       optGroups.push(
-        <Item key="no_data" disabled>
+        <Item key="no_data" disabled checkable={false}>
           {this.loading ? ' ' : this.getNotFoundContent()}
         </Item>,
       );
     }
-    if(typeof window !== 'undefined') {
-      // @ts-ignore 判断ie浏览器处理 下拉栏覆盖问题
-      if(!dropdownMatchSelectWidth && (!!window.ActiveXObject || "ActiveXObject" in window)){
-        overflowYAdd = {overflowY: 'scroll'}
-      }
-    }
-
+    const menuPrefix = this.getMenuPrefixCls();
     return (
       <Menu
         ref={this.saveMenu}
@@ -542,13 +711,20 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
         defaultActiveFirst
         multiple={this.menuMultiple}
         selectedKeys={selectedKeys}
-        prefixCls={this.getMenuPrefixCls()}
+        prefixCls={menuPrefix}
         onClick={this.handleMenuClick}
-        style={{...dropdownMenuStyle,...overflowYAdd}}
+        style={{ ...IeMenuStyle, ...dropdownMenuStyle }}
         focusable={false}
         {...menuProps}
       >
         {optGroups}
+        {
+          options.paging && options.currentPage < options.totalPage && (
+            <Item key={MORE_KEY} checkable={false} className={`${menuPrefix}-item-more`}>
+              <Icon type="more_horiz" />
+            </Item>
+          )
+        }
       </Menu>
     );
   }
@@ -563,9 +739,34 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
   }
 
   @computed
+  get dropdownMatchSelectWidth(): boolean | undefined {
+    const { dropdownMatchSelectWidth = getConfig('dropdownMatchSelectWidth') } = this.observableProps;
+    return dropdownMatchSelectWidth;
+  }
+
+  @computed
+  get selectReverse(): boolean | undefined {
+    const { selectReverse = getConfig('selectReverse') } = this.observableProps;
+    return selectReverse;
+  }
+
+  @computed
   get loading(): boolean {
     const { field, options } = this;
     return options.status === DataSetStatus.loading || (!!field && field.pending.length > 0);
+  }
+
+  renderSelectAll(): ReactNode {
+    const { selectAllButton } = this.props;
+    if (this.multiple && selectAllButton) {
+      return (
+        <div key="check-all" className={`${this.prefixCls}-select-all-none`}>
+          <span onClick={this.chooseAll}>{$l('Select', 'select_all')}</span>
+          {this.selectReverse && <span onClick={this.chooseRe}>{$l('Select', 'select_re')}</span>}
+          <span onClick={this.unChooseAll}>{$l('Select', 'unselect_all')}</span>
+        </div>
+      );
+    }
   }
 
   getPopupContent(): ReactNode {
@@ -574,41 +775,45 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
         {this.getMenu()}
       </Spin>
     );
-    if (this.multiple) {
-      return [
-        <div key="check-all" className={`${this.prefixCls}-select-all-none`}>
-          <span onClick={this.chooseAll}>{$l('Select', 'select_all')}</span>
-          <span onClick={this.unChooseAll}>{$l('Select', 'unselect_all')}</span>
-        </div>,
-        menu,
-      ];
-    }
-
-    return menu;
+    return [
+      this.renderSelectAll(),
+      menu,
+    ];
   }
 
   @autobind
   getPopupStyleFromAlign(target): CSSProperties | undefined {
-    const { dropdownMatchSelectWidth = getConfig('dropdownMatchSelectWidth') } = this.props;
+    const { isFlat } = this.props;
     if (target) {
-      if (dropdownMatchSelectWidth) {
+      const width = pxToRem(target.getBoundingClientRect().width);
+      if (width !== undefined) {
+        if (this.dropdownMatchSelectWidth && !isFlat) {
+          return {
+            width,
+          };
+        }
         return {
-          width: pxToRem(target.getBoundingClientRect().width),
+          minWidth: width,
         };
       }
-      return {
-        minWidth: pxToRem(target.getBoundingClientRect().width),
-      };
     }
   }
 
-  getTriggerIconFont() {
-    return 'baseline-arrow_drop_down';
+  getTriggerIconFont(): string {
+    return this.searchable && this.isFocused ? 'search' : 'baseline-arrow_drop_down';
   }
 
   @autobind
   handleKeyDown(e) {
     const { menu } = this;
+    /**
+     * 修复ie出现点击backSpace的页面回到上一页问题
+     */
+    if (isIE()) {
+      if (e.keyCode === KeyCode.BACKSPACE) {
+        e.preventDefault();
+      }
+    }
     if (!this.isDisabled() && !this.isReadOnly() && menu) {
       if (this.popup && menu.onKeyDown(e)) {
         stopEvent(e);
@@ -646,22 +851,36 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     super.handleKeyDown(e);
   }
 
+  isMultipleBlockDisabled(v) {
+    const {
+      options,
+      props: { onOption },
+    } = this;
+    const findRecord = this.findByValue(v);
+    const optionProps = findRecord ? onOption({ dataSet: options, record: findRecord }) : undefined;
+    const optionDisabled = (optionProps && optionProps.disabled);
+    return (findRecord && findRecord.get(DISABLED_FIELD) === true) || optionDisabled || this.isDisabled();
+  }
+
   handleKeyDownFirstLast(e, menu: Menu, direction: number) {
     stopEvent(e);
-    const children = menu.getFlatInstanceArray();
-    const activeItem = children[direction < 0 ? 0 : children.length - 1];
-    if (activeItem) {
-      if (!this.editable || this.popup) {
-        updateActiveKey(menu, activeItem.props.eventKey);
-      }
-      if (!this.editable && !this.popup) {
-        this.choose(activeItem.props.value);
+    // TreeSelect event conflict
+    if (!menu.tree) {
+      const children = menu.getFlatInstanceArray();
+      const activeItem = children[direction < 0 ? 0 : children.length - 1];
+      if (activeItem) {
+        if (!this.editable || this.popup) {
+          updateActiveKey(menu, activeItem.props.eventKey);
+        }
+        if (!this.editable && !this.popup) {
+          this.choose(activeItem.props.value);
+        }
       }
     }
   }
 
   handleKeyDownPrevNext(e, menu: Menu, direction: number) {
-    if (!this.multiple && !this.editable) {
+    if (!this.multiple && !this.editable && !menu.tree) {
       const activeItem = menu.step(direction);
       if (activeItem) {
         updateActiveKey(menu, activeItem.props.eventKey);
@@ -819,7 +1038,8 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     }
   }
 
-  handlePopupAnimateAppear() {}
+  handlePopupAnimateAppear() {
+  }
 
   getValueKey(v) {
     if (isArrayLike(v)) {
@@ -831,14 +1051,27 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
   }
 
   @autobind
-  handlePopupAnimateEnd(_key, _exists) {}
+  handlePopupAnimateEnd(_key, _exists) {
+  }
 
   @autobind
   handleMenuClick({
+    key,
     item: {
       props: { value },
     },
   }) {
+    if (key === MORE_KEY) {
+      this.options.queryMore(this.options.currentPage + 1);
+    } else if (this.multiple && this.isSelected(value)) {
+      this.unChoose(value);
+    } else {
+      this.choose(value);
+    }
+  }
+
+  @autobind
+  handleCommonItemClick(value) {
     if (this.multiple && this.isSelected(value)) {
       this.unChoose(value);
     } else {
@@ -846,25 +1079,33 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     }
   }
 
-  handleOptionSelect(record: Record) {
-    this.prepareSetValue(this.processRecordToObject(record));
+  handleOptionSelect(record: Record | Record[]) {
+    this.prepareSetValue(...(isArrayLike(record) ? record.map(this.processRecordToObject, this) : [this.processRecordToObject(record)]));
   }
 
-  handleOptionUnSelect(record: Record) {
+  handleOptionUnSelect(record: Record | Record[]) {
     const { valueField } = this;
-    const newValue = record.get(valueField);
-    this.removeValue(newValue, -1);
+    const newValues = isArrayLike(record) ? record.map(r => r.get(valueField)) : [record.get(valueField)];
+    this.removeValues(newValues, -1);
+  }
+
+  handleSearch(_text?: string) {
   }
 
   @action
   setText(text?: string): void {
     super.setText(text);
-    if (this.searchable && isString(this.searchMatcher)) {
+    if (this.searchable) {
       this.doSearch(text);
     }
   }
 
-  doSearch = debounce(value => this.searchRemote(value), 500);
+  doSearch = debounce(value => {
+    if (isString(this.searchMatcher)) {
+      this.searchRemote(value);
+    }
+    this.handleSearch(value);
+  }, 500);
 
   searchRemote(value) {
     const { field, searchMatcher } = this;
@@ -873,12 +1114,17 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     }
   }
 
+  /**
+   * 该方法会被onChange和onCompositionend触发
+   * @param e 改变事件
+   */
   @autobind
   @action
   handleChange(e) {
     const {
       target,
       target: { value },
+      type,
     } = e;
     const restricted = this.restrictInput(value);
     if (restricted !== value) {
@@ -888,18 +1134,19 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     }
     this.setText(restricted);
     if (this.observableProps.combo) {
-      this.generateComboOption(restricted, text => this.setText(text));
+      if (type !== 'compositionend') {
+        this.generateComboOption(restricted, text => this.setText(text));
+      }
     }
     if (!this.popup) {
       this.expand();
     }
   }
 
-  
 
   processRecordToObject(record: Record) {
     const { primitive, valueField } = this;
-    // 如果为原始值那么 restricted 失效 
+    // 如果为原始值那么 restricted 失效
     const restricted = this.restrictInput(record.get(valueField));
     return primitive ? restricted : record.toData();
   }
@@ -937,8 +1184,28 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
 
   @action
   clear() {
+    const values = this.getValues();
+    const valueLength = values.length;
+    const {
+      props: { maxTagCount = valueLength, onClear = noop, onOption = noop },
+      options,
+    } = this;
     this.setText(undefined);
-    super.clear();
+    if (this.multiple) {
+      const valuesDisabled = values.slice(0, maxTagCount).filter(v => {
+        const recordItem = this.findByValue(v);
+        const findRecord = this.findByValue(v);
+        const optionProps = findRecord ? onOption({ dataSet: options, record: findRecord }) : undefined;
+        const optionDisabled = (optionProps && optionProps.disabled);
+        return (recordItem && recordItem.get(DISABLED_FIELD) === true) || optionDisabled;
+      });
+      const multipleValue = valuesDisabled.length > 0 ? valuesDisabled : this.emptyValue;
+      this.setValue(multipleValue);
+    } else {
+      this.setValue(this.emptyValue);
+    }
+    this.rangeValue = this.isFocused ? [undefined, undefined] : undefined;
+    onClear();
     this.removeComboOptions();
   }
 
@@ -954,13 +1221,13 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     this.resetFilter();
   }
 
-  unChoose(record?: Record | null) {
+  unChoose(record?: Record | Record[] | null) {
     if (record) {
       this.handleOptionUnSelect(record);
     }
   }
 
-  choose(record?: Record | null) {
+  choose(record?: Record | Record[] | null) {
     if (!this.multiple) {
       this.collapse();
     }
@@ -971,7 +1238,37 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
 
   @autobind
   chooseAll() {
-    this.setValue(this.filteredOptions.map(this.processRecordToObject, this));
+    const {
+      options,
+      props: { onOption },
+    } = this;
+    const selectedOptions = this.filteredOptions.filter((record) => {
+      const optionProps = onOption({ dataSet: options, record });
+      const optionDisabled = (optionProps && optionProps.disabled);
+      return !optionDisabled;
+    });
+    this.choose(selectedOptions);
+  }
+
+  /**
+   * 反选
+   */
+  @autobind
+  chooseRe() {
+    const {
+      options,
+      valueField,
+      props: { onOption },
+    } = this;
+    const values = this.getValues();
+    const selectedOptions = this.filteredOptions.filter((record) => {
+      const optionProps = onOption({ dataSet: options, record });
+      const value = record.get(valueField);
+      const optionDisabled = (optionProps && optionProps.disabled);
+      const optionIsSelect = values.includes(value);
+      return (!optionDisabled && !optionIsSelect) || (optionDisabled && optionIsSelect) ;
+    });
+    this.setValue(selectedOptions.map(this.processRecordToObject, this));
   }
 
   @autobind
@@ -980,8 +1277,13 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
   }
 
   @autobind
-  async handlePopupHiddenChange(hidden: boolean) {
+  handlePopupHiddenChange(hidden: boolean) {
+    const { field } = this;
+    const noCache = this.getProp('noCache');
     if (!hidden) {
+      if (field) {
+        field.fetchLookup(noCache);
+      }
       this.forcePopupAlign();
     }
     super.handlePopupHiddenChange(hidden);
@@ -1024,19 +1326,23 @@ export class Select<T extends SelectProps> extends TriggerField<T> {
     });
   }
 
-  filterData(data: Record[], text?: string): Record[] {
+  searchData(data: Record[], text?: string): Record[] {
+    const {
+      searchable,
+      searchMatcher,
+    } = this;
+    return searchable && text && typeof searchMatcher === 'function' ? data.filter((r) => this.matchRecordBySearch(r, text)) : data;
+  }
+
+  @autobind
+  matchRecordBySearch(record: Record, text?: string): boolean {
     const {
       textField,
       valueField,
       searchable,
       searchMatcher,
-      props: { optionsFilter },
     } = this;
-    data = optionsFilter ? data.filter(optionsFilter!) : data;
-    if (searchable && text && typeof searchMatcher === 'function') {
-      return data.filter(record => searchMatcher({ record, text, textField, valueField }));
-    }
-    return data;
+    return !(searchable && text && typeof searchMatcher === 'function') || searchMatcher({ record, text, textField, valueField });
   }
 }
 
@@ -1047,4 +1353,6 @@ export default class ObserverSelect extends Select<SelectProps> {
   static Option = Option;
 
   static OptGroup = OptGroup;
+
+  static __PRO_SELECT = true;
 }

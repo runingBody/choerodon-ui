@@ -91,21 +91,23 @@ export default class TimesView extends DaysView {
     this.panel = node;
   }
 
-  getObservableProps(props) {
+  getObservableProps(props, context) {
     return {
+      ...super.getObservableProps(props, context),
       format: props.format,
     };
   }
 
   componentDidMount(): void {
     if (this.panel) {
-      this.panel.addEventListener('mousewheel', this.handleWheel, { passive: false });
+      // 兼容Firefox wheel为通用事件
+      this.panel.addEventListener('wheel', this.handleWheel, { passive: false });
     }
   }
 
   componentWillUnmount(): void {
     if (this.panel) {
-      this.panel.removeEventListener('mousewheel', this.handleWheel);
+      this.panel.removeEventListener('wheel', this.handleWheel);
     }
   }
 
@@ -388,10 +390,10 @@ export default class TimesView extends DaysView {
 
   choose(date: Moment) {
     const { mode } = this.props;
+    super.choose(date);
     if (mode !== ViewMode.time) {
       this.changeSelectedDate(date);
       this.changeViewMode(mode);
     }
-    super.choose(date);
   }
 }

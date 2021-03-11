@@ -1,13 +1,15 @@
-import React, { ReactNode } from 'react';
+import React, { ReactInstance, ReactNode } from 'react';
 import PropTypes from 'prop-types';
 import { action, computed, isArrayLike, runInAction } from 'mobx';
 import { observer } from 'mobx-react';
 import isString from 'lodash/isString';
 import isNumber from 'lodash/isNumber';
+import omit from 'lodash/omit';
 import isPlainObject from 'lodash/isPlainObject';
 import defaultTo from 'lodash/defaultTo';
 import isNil from 'lodash/isNil';
 import KeyCode from 'choerodon-ui/lib/_util/KeyCode';
+import { getConfig } from 'choerodon-ui/lib/configure';
 import { TextField, TextFieldProps } from '../text-field/TextField';
 import autobind from '../_util/autobind';
 import keepRunning from '../_util/keepRunning';
@@ -18,11 +20,21 @@ import isEmpty from '../_util/isEmpty';
 import { $l } from '../locale-context';
 import { FieldType } from '../data-set/enum';
 import { ValidatorProps } from '../validator/rules';
-import formatNumber from '../formatter/formatNumber';
+import defaultFormatNumber from '../formatter/formatNumber';
+import { Lang } from '../locale-context/enum';
+import localeContext from '../locale-context/LocaleContext';
 
 function getCurrentValidValue(value: string): number {
   return Number(value.replace(/\.$/, '')) || 0;
 }
+
+export type FormatNumberFunc = (value: string, lang: string, options: Intl.NumberFormatOptions) => string;
+
+export type FormatNumberFuncOptions = {
+  lang?: string,
+  options?: Intl.NumberFormatOptions;
+};
+
 
 export interface NumberFieldProps extends TextFieldProps {
   /**
@@ -37,6 +49,26 @@ export interface NumberFieldProps extends TextFieldProps {
    * 步距
    */
   step?: number;
+  /**
+   * 非严格步距
+   */
+  nonStrictStep?: boolean;
+  /**
+   * 格式器
+   */
+  formatter?: FormatNumberFunc;
+  /**
+   * 格式器参数
+   */
+  formatterOptions?: FormatNumberFuncOptions;
+  /**
+   * 值变化回调
+   */
+  onChange?: (value: number, oldValue: number, form?: ReactInstance) => void;
+  /**
+   *是否长按按钮按步距增加
+   */
+  longPressPlus: boolean;
 }
 
 export class NumberField<T extends NumberFieldProps> extends TextField<T & NumberFieldProps> {
@@ -55,15 +87,49 @@ export class NumberField<T extends NumberFieldProps> extends TextField<T & Numbe
      * 步距
      */
     step: PropTypes.number,
+    /**
+     * 非严格步距
+     */
+    nonStrictStep: PropTypes.bool,
+    /**
+     * 格式器
+     */
+    formatter: PropTypes.func,
+    /**
+     * 格式器参数
+     */
+    longPressPlus: PropTypes.bool,
+    /**
+     * 是否开启长按步距增加
+     */
+    formatterOptions: PropTypes.object,
     ...TextField.propTypes,
   };
 
   static defaultProps = {
     ...TextField.defaultProps,
     suffixCls: 'input-number',
+    longPressPlus: true,
   };
 
-  static format = formatNumber;
+  static format = defaultFormatNumber;
+
+  @computed
+  get lang(): Lang {
+    const { lang } = this.observableProps;
+    if (lang) {
+      return lang;
+    }
+    const { dataSet } = this;
+    if (dataSet && dataSet.lang) {
+      return dataSet.lang;
+    }
+    const { numberFormatLanguage, locale } = localeContext;
+    if (numberFormatLanguage) {
+      return numberFormatLanguage;
+    }
+    return locale.lang;
+  }
 
   @computed
   get defaultValidationMessages(): ValidationMessages {
@@ -77,9 +143,26 @@ export class NumberField<T extends NumberFieldProps> extends TextField<T & Numbe
 
   @computed
   get allowDecimal(): boolean {
-    const { min } = this;
+    const { min, nonStrictStep } = this;
+    // 非严格步距下允许输入小数
+    if (nonStrictStep) {
+      return true;
+    }
     const step = this.getProp('step');
     return !step || (step as number) % 1 !== 0 || (!!min && (min as number) % 1 !== 0);
+  }
+
+  @computed
+  get nonStrictStep(): boolean {
+    const nonStrictStep = this.getProp('nonStrictStep');
+    if (nonStrictStep !== undefined) {
+      return nonStrictStep;
+    }
+    const numberFieldNonStrictStep = getConfig('numberFieldNonStrictStep');
+    if (numberFieldNonStrictStep !== undefined) {
+      return numberFieldNonStrictStep;
+    }
+    return false;
   }
 
   @computed
@@ -146,32 +229,38 @@ export class NumberField<T extends NumberFieldProps> extends TextField<T & Numbe
   getValidatorProps(): ValidatorProps {
     const { min, max } = this;
     const step = this.getProp('step');
+    const nonStrictStep = this.nonStrictStep;
+
     return {
       ...super.getValidatorProps(),
       min,
       max,
       step,
+      nonStrictStep,
     };
   }
 
   getInnerSpanButton(): ReactNode {
     const { prefixCls, range } = this;
+    const { longPressPlus } = this.props;
     const step = this.getProp('step');
     if (step && !range && !this.isReadOnly()) {
+      const plusIconProps = {
+        key: 'plus',
+        type: 'keyboard_arrow_up',
+        className: `${prefixCls}-plus`,
+        onMouseDown: longPressPlus ? this.handlePlus : this.handleOncePlus,
+      };
+      const minIconProps = {
+        key: 'minus',
+        type: 'keyboard_arrow_down',
+        className: `${prefixCls}-minus`,
+        onMouseDown: longPressPlus ? this.handleMinus : this.handleOnceMinus,
+      };
       return this.wrapperInnerSpanButton(
         <div>
-          <Icon
-            key="plus"
-            type="keyboard_arrow_up"
-            className={`${prefixCls}-plus`}
-            onMouseDown={this.handlePlus}
-          />
-          <Icon
-            key="minus"
-            type="keyboard_arrow_down"
-            className={`${prefixCls}-minus`}
-            onMouseDown={this.handleMinus}
-          />
+          <Icon {...plusIconProps} />
+          <Icon {...minIconProps} />
         </div>,
       );
     }
@@ -229,10 +318,32 @@ export class NumberField<T extends NumberFieldProps> extends TextField<T & Numbe
     this.step(false);
   }
 
+  @autobind
+  handleOncePlus() {
+    this.step(true);
+  }
+
+  @autobind
+  handleOnceMinus() {
+    this.step(false);
+  }
+
+  getOtherProps() {
+    const otherProps = omit(super.getOtherProps(), [
+      'nonStrictStep',
+      'formatter',
+      'formatterOptions',
+      'longPressPlus',
+    ]);
+    return otherProps;
+  }
+
   step(isPlus: boolean) {
     const min = defaultTo(this.min, -MAX_SAFE_INTEGER);
     const max = defaultTo(this.max, MAX_SAFE_INTEGER);
     const step = defaultTo(this.getProp('step'), 1);
+    const nonStrictStep = this.nonStrictStep;
+    // 需要处理非严格模式
     let newValue;
     const value =
       this.multiple || this.isFocused ? Number(this.text || this.getValue()) : this.getValue();
@@ -242,7 +353,7 @@ export class NumberField<T extends NumberFieldProps> extends TextField<T & Numbe
       const currentValue = getCurrentValidValue(String(value));
       newValue = currentValue;
       const nearStep = getNearStepValues(currentValue, step as number, min, max);
-      if (nearStep) {
+      if (nonStrictStep === false && nearStep) {
         switch (nearStep.length) {
           case 1:
             newValue = nearStep[0];
@@ -258,6 +369,7 @@ export class NumberField<T extends NumberFieldProps> extends TextField<T & Numbe
           newValue = min;
         } else if (nextValue > max) {
           const nearMaxStep = getNearStepValues(max as number, step as number, min, max as number);
+
           if (nearMaxStep) {
             newValue = nearMaxStep[0];
           } else {
@@ -268,13 +380,15 @@ export class NumberField<T extends NumberFieldProps> extends TextField<T & Numbe
         }
       }
     }
-    if (this.value !== newValue) {
-      if (this.multiple) {
-        this.setText(String(newValue));
-      } else {
-        this.prepareSetValue(newValue);
-      }
+    // 不要进行对比操作,在table中使用的时候,因为NumberField会作为editor使用,所以在 对第一个cell只点击一次的情况下(例如plus)
+    // 此时切换到第二个cell进行编辑，无法进行上次操作(同上次的plus)
+    // this.value !== newValue
+    if (this.multiple) {
+      this.setText(String(newValue));
+    } else {
+      this.prepareSetValue(newValue);
     }
+
   }
 
   prepareSetValue(value: any): void {
@@ -300,20 +414,46 @@ export class NumberField<T extends NumberFieldProps> extends TextField<T & Numbe
     return value;
   }
 
-  getFormatOptions(value?: number): Intl.NumberFormatOptions | undefined {
+  getFormatOptions(value?: number): FormatNumberFuncOptions {
     const precision = getPrecision(isNil(value) ? this.getValue() || 0 : value);
-    return {
-      minimumFractionDigits: precision,
-      maximumFractionDigits: precision,
+    const defaultOptions = {
+      lang: this.lang,
+      options: {
+        minimumFractionDigits: precision,
+        maximumFractionDigits: precision,
+      },
     };
+
+    const formatterOptions: FormatNumberFuncOptions = this.getProp('formatterOptions') || {};
+    const numberFieldFormatterOptions: FormatNumberFuncOptions = getConfig('numberFieldFormatterOptions') || {};
+    if (formatterOptions) {
+      return {
+        lang: formatterOptions.lang || numberFieldFormatterOptions.lang || defaultOptions.lang,
+        options: {
+          ...defaultOptions.options,
+          ...numberFieldFormatterOptions.options,
+          ...formatterOptions.options,
+        },
+      };
+    }
+    return defaultOptions;
   }
 
   getFormatter() {
-    return formatNumber;
+    const formatter = this.getProp('formatter');
+    if (formatter !== undefined) {
+      return formatter;
+    }
+    const numberFieldFormatter = getConfig('numberFieldFormatter');
+    if (numberFieldFormatter !== undefined) {
+      return numberFieldFormatter;
+    }
+    return defaultFormatNumber;
   }
 
   processText(value: string): string {
-    return this.getFormatter()(value, this.lang, this.getFormatOptions(Number(value)));
+    const formatOptions = this.getFormatOptions(Number(value));
+    return this.getFormatter()(value, formatOptions.lang, formatOptions.options);
   }
 }
 
@@ -321,5 +461,5 @@ export class NumberField<T extends NumberFieldProps> extends TextField<T & Numbe
 export default class ObserverNumberField extends NumberField<NumberFieldProps> {
   static defaultProps = NumberField.defaultProps;
 
-  static format = formatNumber;
+  static format = defaultFormatNumber;
 }

@@ -53,7 +53,7 @@ class App extends React.Component {
     },
     fields: [
       { name: 'name', type: 'string', label: '姓名', required: true },
-      { name: 'age', type: 'number', label: '年龄' },
+      { name: 'age', type: 'number', label: '年龄', step: 1 },
       {
         name: 'sex',
         type: 'string',
@@ -72,7 +72,7 @@ class App extends React.Component {
     selection: 'single',
     fields: [
       { name: 'name', type: 'string', label: '姓名', required: true },
-      { name: 'age', type: 'number', label: '年龄' },
+      { name: 'age', type: 'number', label: '年龄', step: 1 },
       {
         name: 'sex',
         type: 'string',
@@ -92,7 +92,7 @@ class App extends React.Component {
     autoCreate: true,
     fields: [
       { name: 'name', type: 'intl', label: '姓名', required: true },
-      { name: 'age', type: 'number', label: '年龄' },
+      { name: 'age', type: 'number', label: '年龄', step: 1 },
       {
         name: 'sex',
         type: 'string',
@@ -112,7 +112,13 @@ class App extends React.Component {
 
   userDs = new DataSet({
     primaryKey: 'userid',
-    name: 'user',
+    transport: {
+      read({ params: { page, pagesize } }) {
+        return {
+          url: `/dataset/user/page/${pagesize}/${page}`,
+        };
+      },
+    },
     autoQuery: false,
     autoCreate: true,
     pageSize: 5,
@@ -235,7 +241,7 @@ class App extends React.Component {
       this.toJSONDataButton,
     ];
     return [
-      <Table key="user" buttons={buttons} dataSet={this.userDs} header="User">
+      <Table key="user" buttons={buttons} dataSet={this.userDs} header="User" rowHeight="auto" dragColumn rowNumber={({ text }) => `#${text}`}>
         <Column name="userid" editor />
         <Column name="age" editor width={150} />
         <Column name="enable" editor width={50} />

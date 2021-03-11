@@ -13,6 +13,7 @@ export default class Menus extends Component {
     },
     prefixCls: 'rc-cascader-menus',
     visible: false,
+    selectedValues: [],
     expandTrigger: 'click',
     expandIcon: <Icon type="navigate_next" />,
   };
@@ -20,6 +21,7 @@ export default class Menus extends Component {
   static propTypes = {
     value: PropTypes.array,
     activeValue: PropTypes.array,
+    selectedValues: PropTypes.array,
     options: PropTypes.array.isRequired,
     prefixCls: PropTypes.string,
     expandTrigger: PropTypes.string,
@@ -46,10 +48,12 @@ export default class Menus extends Component {
   }
 
   getOption(option, menuIndex) {
-    const { prefixCls, expandTrigger, expandIcon } = this.props;
-    const onSelect = this.props.onSelect.bind(this, option, menuIndex);
+    const { prefixCls, expandTrigger, expandIcon, selectedValues } = this.props;
+    const onSelect = this.props.onSelect.bind(this, option, menuIndex,false);
     let expandProps = {
-      onClick: onSelect,
+      onClick: () => {
+        return onSelect('click');
+      }
     };
     let menuItemCls = `${prefixCls}-menu-item`;
     let expandIconNode = null;
@@ -62,11 +66,16 @@ export default class Menus extends Component {
         </span>
       );
     }
+    if (selectedValues.findIndex((item) => item === option.value) > -1) {
+      menuItemCls += ` ${prefixCls}-menu-item-selected`;
+    }
     if (expandTrigger === 'hover' && hasChildren) {
       expandProps = {
         onMouseEnter: this.delayOnSelect.bind(this, onSelect),
         onMouseLeave: this.delayOnSelect.bind(this),
-        onClick: onSelect,
+        onClick: () => {
+          return onSelect('click');
+        },
       };
     }
     if (this.isActiveOption(option, menuIndex)) {
@@ -120,7 +129,7 @@ export default class Menus extends Component {
     }
     if (typeof onSelect === 'function') {
       this.delayTimer = setTimeout(() => {
-        onSelect(args);
+        onSelect('hover',args);
         this.delayTimer = null;
       }, 150);
     }

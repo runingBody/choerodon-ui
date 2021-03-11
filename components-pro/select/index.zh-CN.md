@@ -20,7 +20,8 @@ title: Select
 | --- | --- | --- | --- |
 | combo | 复合输入值 | boolean | false |
 | searchable | 是否可搜索 | boolean | false |
-| searchMatcher | 搜索器。当为字符串时，作为 lookup 的参数名来重新请求值列表。 | string \| ({ record, text, textField, valueField }) => boolean | ({ record, text, textField }) => record.get(textField).indexOf(text) !== -1 |
+| searchMatcher | 搜索器。当为字符串时，作为 lookup 的参数名来重新请求值列表。 | string \| ({ record, text, textField, valueField }) => boolean | ({ record, text, textField }) => record.get(textField) && record.get(textField).indexOf(text) !== -1 |
+| paramMatcher | 参数匹配器。当为字符串时，进行参数拼接。 | string \| ({ record, text, textField, valueField }) => string | |
 | optionsFilter | 选项过滤 | (record) => boolean |  |
 | checkValueOnOptionsChange | 当选项改变时，检查并清除不在选项中的值 | boolean | true |
 | dropdownMatchSelectWidth | 下拉框匹配输入框宽度 | boolean | true |
@@ -30,6 +31,13 @@ title: Select
 | optionRenderer | 渲染 Option 本文的钩子 | ({ record, text, value }) => ReactNode |  |
 | notFoundContent | 当下拉列表为空时显示的内容 | ReactNode |  |
 | onOption | 设置选项属性，如 disabled | ({ dataSet, record })) => object |  |
+| commonItem | 设置常用项 | Array&lt;string&gt; | undefined |
+| maxCommonTagPlaceholder | 设置常用项标签超出最大数量时的占位描述 | ReactNode \| (restValues) => ReactNode |  |
+| maxCommonTagCount | 设置常用项标签最大数量 | number |  |
+| maxCommonTagTextLength | 设置常用项标签文案最大长度 | number |  |
+| noCache    | 下拉时自动重新查询，不缓存下拉数据源                                   | boolean |   |
+| selectAllButton | 多选模式下，是否显示全选按钮 | boolean | true  |
+| reverse | 多选模式下，是否显示反选按钮 | boolean | false  |
 
 更多属性请参考 [TriggerField](/components-pro/trigger-field/#TriggerField)。
 

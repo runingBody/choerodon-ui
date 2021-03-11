@@ -108,7 +108,7 @@ export class LovCodeStore {
   getDefineAxiosConfig(code: string, field?: Field): AxiosRequestConfig | undefined {
     const lovDefineAxiosConfig =
       (field && field.get('lovDefineAxiosConfig')) || getConfig('lovDefineAxiosConfig');
-    const config = processAxiosConfig(lovDefineAxiosConfig, code);
+    const config = processAxiosConfig(lovDefineAxiosConfig, code, field);
     return {
       ...config,
       url: config.url || this.getConfigUrl(code, field),
@@ -154,6 +154,7 @@ export class LovCodeStore {
         },
         primaryKey: valueField,
         cacheSelection: true,
+        autoLocateFirst: false,
       };
       if (!isNil(lovPageSize) && !isNaN(Number(lovPageSize))) {
         dataSetProps.pageSize = Number(lovPageSize);
@@ -204,10 +205,11 @@ export class LovCodeStore {
     return (props: TransportHookProps) => {
       const lovQueryAxiosConfig =
         (field && field.get('lovQueryAxiosConfig')) || getConfig('lovQueryAxiosConfig');
-      const axiosConfig = processAxiosConfig(lovQueryAxiosConfig, code, config, props);
+      const lovQueryUrl = this.getQueryUrl(code, field, props);
+      const axiosConfig = processAxiosConfig(lovQueryAxiosConfig, code, config, props, lovQueryUrl);
       return {
         ...axiosConfig,
-        url: axiosConfig.url || this.getQueryUrl(code, field, props),
+        url: axiosConfig.url || lovQueryUrl,
         method: axiosConfig.method || 'post',
       };
     };

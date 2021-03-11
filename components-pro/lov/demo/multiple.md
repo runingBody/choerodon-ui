@@ -35,10 +35,9 @@ class App extends React.Component {
       {
         name: 'code',
         type: 'object',
-        lovCode: 'LOV_CODE',
+        lovCode: 'LOV_MOCK_CODE',
         multiple: true,
         required: true,
-        defaultValue: ['Mock'],
       },
     ],
     cacheSelection: true,
@@ -49,7 +48,7 @@ class App extends React.Component {
   });
 
   render() {
-    return <Lov dataSet={this.ds} name="code" placeholder="复选LOV" />;
+    return <Lov dataSet={this.ds} searchAction="blur" name="code" placeholder="复选LOV" />;
   }
 }
 

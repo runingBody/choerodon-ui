@@ -1,8 +1,8 @@
 ---
 order: 6
 title:
-  zh-CN: 高级搜索条
-  en-US: Advanced Search Bar
+  zh-CN: 专业搜索条
+  en-US: professionalBar
 ---
 
 ## zh-CN
@@ -11,7 +11,7 @@ title:
 
 ## en-US
 
-Advanced Search Bar.
+professionalBar.
 
 ```jsx
 import { DataSet, Table, Button } from 'choerodon-ui/pro';
@@ -26,7 +26,13 @@ class App extends React.Component {
 
   ds = new DataSet({
     primaryKey: 'userid',
-    name: 'user',
+    transport: {
+      read({ params: { page, pagesize } }) {
+        return {
+          url: `/dataset/user/page/${pagesize}/${page}`,
+        };
+      },
+    },
     autoQuery: true,
     pageSize: 5,
     queryFields: [
@@ -78,7 +84,7 @@ class App extends React.Component {
       <Table
         buttons={['add']}
         dataSet={this.ds}
-        queryBar="advancedBar"
+        queryBar="professionalBar"
         border={false}
         columns={this.columns}
         queryFieldsLimit={2}

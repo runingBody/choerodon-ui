@@ -60,7 +60,7 @@ export interface TriggerProps extends ElementProps {
   popupPlacement?: string;
   popupAlign?: object;
   builtinPlacements?: any;
-  onPopupAlign?: (source: Node, align: object, target: Node | Window) => void;
+  onPopupAlign?: (source: Node, align: object, target: Node | Window, translate: { x: number, y: number }) => void;
   onPopupAnimateAppear?: (key: Key | null) => void;
   onPopupAnimateEnter?: (key: Key | null) => void;
   onPopupAnimateLeave?: (key: Key | null) => void;
@@ -76,6 +76,8 @@ export interface TriggerProps extends ElementProps {
   mouseLeaveDelay?: number;
   transitionName?: string;
   defaultPopupHidden?: boolean;
+  popupClassName?: string;
+  onMouseDown?: (event: React.MouseEvent<any, MouseEvent>) => void;
 }
 
 @observer
@@ -118,6 +120,8 @@ export default class Trigger extends Component<TriggerProps> {
     mouseLeaveDelay: PropTypes.number,
     transitionName: PropTypes.string,
     defaultPopupHidden: PropTypes.bool,
+    popupClassName: PropTypes.string,
+    onMouseDown: PropTypes.func,
   };
 
   static defaultProps = {
@@ -137,8 +141,8 @@ export default class Trigger extends Component<TriggerProps> {
   isClickScrollbar: {
     value: boolean
   } = {
-      value: false,
-    };
+    value: false,
+  };
 
   popup: Popup | null;
 
@@ -166,7 +170,7 @@ export default class Trigger extends Component<TriggerProps> {
   render() {
     const { children } = this.props;
     const popup = this.getPopup();
-    const newChildren = Children.map(children, child => {
+    const newChildren = popup ? Children.map(children, child => {
       if (isValidElement(child)) {
         const newChildProps: any = {};
         if (this.isContextMenuToShow()) {
@@ -191,7 +195,7 @@ export default class Trigger extends Component<TriggerProps> {
         return <TriggerChild {...newChildProps}>{child}</TriggerChild>;
       }
       return child;
-    });
+    }) : children;
     return [newChildren, popup];
   }
 
@@ -321,6 +325,7 @@ export default class Trigger extends Component<TriggerProps> {
       prefixCls,
       popupCls,
       popupStyle,
+      popupClassName,
       onPopupAnimateAppear,
       onPopupAnimateEnter,
       onPopupAnimateLeave,
@@ -331,40 +336,43 @@ export default class Trigger extends Component<TriggerProps> {
       getRootDomNode = this.getRootDomNode,
       transitionName,
       getPopupContainer,
+      onMouseDown = this.handlePopupMouseDown,
     } = this.props;
-    const visible = !this.popupHidden && popupContent;
-    const mouseProps: any = {};
-    if (this.isMouseEnterToShow()) {
-      mouseProps.onMouseEnter = this.handlePopupMouseEnter;
+    if (popupContent) {
+      const visible = !this.popupHidden;
+      const mouseProps: any = {};
+      if (this.isMouseEnterToShow()) {
+        mouseProps.onMouseEnter = this.handlePopupMouseEnter;
+      }
+      if (this.isMouseLeaveToHide()) {
+        mouseProps.onMouseLeave = this.handlePopupMouseLeave;
+      }
+      return (
+        <Popup
+          key="popup"
+          ref={this.saveRef}
+          transitionName={transitionName}
+          className={classNames(`${prefixCls}-popup`, popupCls, popupClassName)}
+          style={popupStyle}
+          hidden={!visible}
+          align={this.getPopupAlign()}
+          onAlign={onPopupAlign}
+          onMouseDown={onMouseDown}
+          onMouseUp={this.handlePopupMouseUp}
+          getRootDomNode={getRootDomNode}
+          onAnimateAppear={onPopupAnimateAppear}
+          onAnimateEnter={onPopupAnimateEnter}
+          onAnimateLeave={onPopupAnimateLeave}
+          onAnimateEnd={onPopupAnimateEnd}
+          getStyleFromAlign={getPopupStyleFromAlign}
+          getClassNameFromAlign={this.getPopupClassNameFromAlign}
+          getPopupContainer={getPopupContainer}
+          {...mouseProps}
+        >
+          {popupContent}
+        </Popup>
+      );
     }
-    if (this.isMouseLeaveToHide()) {
-      mouseProps.onMouseLeave = this.handlePopupMouseLeave;
-    }
-    return (
-      <Popup
-        key="popup"
-        ref={this.saveRef}
-        transitionName={transitionName}
-        className={classNames(`${prefixCls}-popup`, popupCls)}
-        style={popupStyle}
-        hidden={!visible}
-        align={this.getPopupAlign()}
-        onAlign={onPopupAlign}
-        onMouseDown={this.handlePopupMouseDown}
-        onMouseUp={this.handlePopupMouseUp}
-        getRootDomNode={getRootDomNode}
-        onAnimateAppear={onPopupAnimateAppear}
-        onAnimateEnter={onPopupAnimateEnter}
-        onAnimateLeave={onPopupAnimateLeave}
-        onAnimateEnd={onPopupAnimateEnd}
-        getStyleFromAlign={getPopupStyleFromAlign}
-        getClassNameFromAlign={this.getPopupClassNameFromAlign}
-        getPopupContainer={getPopupContainer}
-        {...mouseProps}
-      >
-        {popupContent}
-      </Popup>
-    );
   }
 
   getPopupAlign() {
@@ -377,13 +385,13 @@ export default class Trigger extends Component<TriggerProps> {
 
   @autobind
   handlePopupMouseDown(e) {
-    this.isClickScrollbar.value = true
+    this.isClickScrollbar.value = true;
     e.preventDefault();
   }
 
   @autobind
   handlePopupMouseUp() {
-    this.isClickScrollbar.value = false
+    this.isClickScrollbar.value = false;
   }
 
   @autobind

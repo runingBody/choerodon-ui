@@ -1,34 +1,49 @@
 import React, { Children, isValidElement, ReactNode } from 'react';
-import { action, computed, observable, runInAction } from 'mobx';
+import { action, computed, observable, runInAction, set } from 'mobx';
 import isNil from 'lodash/isNil';
 import isPlainObject from 'lodash/isPlainObject';
 import defer from 'lodash/defer';
+import isNumber from 'lodash/isNumber';
 import measureScrollbar from 'choerodon-ui/lib/_util/measureScrollbar';
 import { getConfig, getProPrefixCls } from 'choerodon-ui/lib/configure';
+import Icon from 'choerodon-ui/lib/icon';
+import isFunction from 'lodash/isFunction';
 import Column, { ColumnProps, columnWidth } from './Column';
 import DataSet from '../data-set/DataSet';
 import Record from '../data-set/Record';
 import ObserverCheckBox from '../check-box';
 import ObserverRadio from '../radio';
-import { DataSetSelection, RecordStatus } from '../data-set/enum';
+import { DataSetSelection } from '../data-set/enum';
 import {
   ColumnAlign,
   ColumnLock,
+  ColumnsEditType,
+  DragColumnAlign,
   SelectionMode,
+  TableColumnTooltip,
   TableEditMode,
   TableMode,
   TableQueryBarType,
 } from './enum';
 import { stopPropagation } from '../_util/EventManager';
-import { getColumnKey, getHeader } from './utils';
+import { getColumnKey, getHeader, mergeObject, reorderingColumns } from './utils';
 import getReactNodeText from '../_util/getReactNodeText';
 import ColumnGroups from './ColumnGroups';
 import autobind from '../_util/autobind';
 import ColumnGroup from './ColumnGroup';
 import { expandIconProps, TablePaginationConfig } from './Table';
 
-const SELECTION_KEY = '__selection-column__';
+export const SELECTION_KEY = '__selection-column__';
+
+export const ROW_NUMBER_KEY = '__row-number-column__';
+
+export const DRAG_KEY = '__drag-column__';
+
 export const EXPAND_KEY = '__expand-column__';
+
+export const PENDING_KEY = '__pending__';
+
+export const LOADED_KEY = '__loaded__';
 
 export type HeaderText = { name: string; label: string; };
 
@@ -42,7 +57,19 @@ export const getIdList = (startId: number, endId: number) => {
   return idList;
 };
 
-function renderSelectionBox({ record, store }: { record: any, store: TableStore; }) {
+function getRowNumbers(record?: Record | null, dataSet?: DataSet | null, isTree?: boolean): number[] {
+  if (record && dataSet) {
+    const { paging, currentPage, pageSize } = dataSet;
+    const pageIndex = (isTree ? paging === 'server' : paging) ? (currentPage - 1) * pageSize : 0;
+    if (isTree) {
+      return record.path.map((r, index) => r.indexInParent + 1 + (index === 0 ? pageIndex : 0));
+    }
+    return [record.index + 1 + pageIndex];
+  }
+  return [0];
+}
+
+function renderSelectionBox({ record, store }: { record: any, store: TableStore; }): ReactNode {
   const { dataSet } = record;
   if (dataSet) {
     const { selection } = dataSet;
@@ -89,6 +116,7 @@ function renderSelectionBox({ record, store }: { record: any, store: TableStore;
           onMouseDown={handleMouseDown}
           onMouseEnter={handleMouseEnter}
           disabled={!record.selectable}
+          data-selection-key={SELECTION_KEY}
           value
         />
       );
@@ -102,6 +130,7 @@ function renderSelectionBox({ record, store }: { record: any, store: TableStore;
           onMouseDown={handleMouseDown}
           onMouseEnter={handleMouseEnter}
           disabled={!record.selectable}
+          data-selection-key={SELECTION_KEY}
           value
         />
       );
@@ -109,19 +138,26 @@ function renderSelectionBox({ record, store }: { record: any, store: TableStore;
   }
 }
 
-function mergeDefaultProps(columns: ColumnProps[], defaultKey: number[] = [0]): ColumnProps[] {
+function mergeDefaultProps(columns: ColumnProps[], columnsMergeCoverage?: ColumnProps[], defaultKey: number[] = [0]): ColumnProps[] {
   const columnsNew: any[] = [];
   const leftFixedColumns: any[] = [];
   const rightFixedColumns: any[] = [];
   columns.forEach((column: ColumnProps) => {
     if (isPlainObject(column)) {
-      const newColumn: ColumnProps = { ...Column.defaultProps, ...column };
+      let newColumn: ColumnProps = { ...Column.defaultProps, ...column };
       if (isNil(getColumnKey(newColumn))) {
         newColumn.key = `anonymous-${defaultKey[0]++}`;
       }
       const { children } = newColumn;
       if (children) {
-        newColumn.children = mergeDefaultProps(children, defaultKey);
+        newColumn.children = mergeDefaultProps(children, columnsMergeCoverage, defaultKey);
+      }
+      // TODO 后续可以加key
+      if (columnsMergeCoverage && columnsMergeCoverage.length > 0) {
+        const mergeItem = columnsMergeCoverage.find(columnItem => columnItem.name === column.name);
+        if (mergeItem) {
+          newColumn = mergeObject(['header'], mergeItem, column);
+        }
       }
       if (newColumn.lock === ColumnLock.left || newColumn.lock === true) {
         leftFixedColumns.push(newColumn);
@@ -137,6 +173,7 @@ function mergeDefaultProps(columns: ColumnProps[], defaultKey: number[] = [0]): 
 
 function normalizeColumns(
   elements: ReactNode,
+  columnsMergeCoverage?: ColumnProps[],
   parent: ColumnProps | null = null,
   defaultKey: number[] = [0],
 ) {
@@ -144,11 +181,11 @@ function normalizeColumns(
   const leftFixedColumns: any[] = [];
   const rightFixedColumns: any[] = [];
   Children.forEach(elements, element => {
-    if (!isValidElement(element) || element.type !== Column) {
+    if (!isValidElement(element) || !(element.type as typeof Column).__PRO_TABLE_COLUMN) {
       return;
     }
     const { props, key } = element;
-    const column: any = {
+    let column: any = {
       ...props,
     };
     if (isNil(getColumnKey(column))) {
@@ -157,10 +194,18 @@ function normalizeColumns(
     if (parent) {
       column.lock = parent.lock;
     }
-    column.children = normalizeColumns(column.children, column, defaultKey);
+    column.children = normalizeColumns(column.children, columnsMergeCoverage, column, defaultKey);
     if (key) {
       column.key = key;
     }
+    // 后续可以加key
+    if (columnsMergeCoverage && columnsMergeCoverage.length > 0) {
+      const mergeItem = columnsMergeCoverage.find(columnItem => columnItem.name === column.name);
+      if (mergeItem) {
+        column = mergeObject(['header'], mergeItem, column);
+      }
+    }
+
     if (column.lock === ColumnLock.left || column.lock === true) {
       leftFixedColumns.push(column);
     } else if (column.lock === ColumnLock.right) {
@@ -198,7 +243,7 @@ export default class TableStore {
 
   @observable height?: number;
 
-  @observable lastScrollTop?: number;
+  @observable lastScrollTop: number;
 
   @observable lockColumnsBodyRowsHeight: any;
 
@@ -210,9 +255,13 @@ export default class TableStore {
 
   @observable hoverRow?: Record;
 
+  @observable clickRow?: Record;
+
   @observable currentEditorName?: string;
 
   @observable styledHidden?: boolean;
+
+  @observable rowHighLight: boolean;
 
   mouseBatchChooseStartId: number = 0;
 
@@ -222,9 +271,38 @@ export default class TableStore {
 
   @observable mouseBatchChooseIdList?: number[];
 
+  @observable columnDeep: number;
+
+  @observable multiLineHeight: number[];
+
+  inBatchExpansion: boolean = false;
+
   @computed
   get dataSet(): DataSet {
     return this.props.dataSet;
+  }
+
+  @computed
+  get virtual(): boolean {
+    return this.props.virtual && !!this.height && isNumber(this.rowHeight);
+  }
+
+  @computed
+  get virtualHeight(): number {
+    const { rowHeight, data } = this;
+    return Math.round(data.length * Number(rowHeight));
+  }
+
+  @computed
+  get virtualStartIndex(): number {
+    const { rowHeight, lastScrollTop } = this;
+    return Math.max(Math.round((lastScrollTop / Number(rowHeight)) - 3), 0);
+  }
+
+  @computed
+  get virtualTop(): number {
+    const { rowHeight, virtualStartIndex } = this;
+    return virtualStartIndex * Number(rowHeight);
   }
 
   get hidden(): boolean {
@@ -239,6 +317,18 @@ export default class TableStore {
     const alwaysShowRowBox = getConfig('tableAlwaysShowRowBox');
     if (typeof alwaysShowRowBox !== 'undefined') {
       return alwaysShowRowBox;
+    }
+    return false;
+  }
+
+  @computed
+  get keyboard(): boolean {
+    if ('keyboard' in this.props) {
+      return this.props.keyboard;
+    }
+    const keyboard = getConfig('tableKeyboard');
+    if (typeof keyboard !== 'undefined') {
+      return keyboard;
     }
     return false;
   }
@@ -266,6 +356,36 @@ export default class TableStore {
   }
 
   @computed
+  get dragColumnAlign(): DragColumnAlign | undefined {
+    if ('dragColumnAlign' in this.props) {
+      return this.props.dragColumnAlign;
+    }
+    return getConfig('tableDragColumnAlign');
+  }
+
+  @computed
+  get dragColumn(): boolean | undefined {
+    if (this.columnMaxDeep > 1) {
+      return false;
+    }
+    if ('dragColumn' in this.props) {
+      return this.props.dragColumn;
+    }
+    return getConfig('tableDragColumn');
+  }
+
+  @computed
+  get dragRow(): boolean | undefined {
+    if (this.isTree) {
+      return false;
+    }
+    if ('dragRow' in this.props) {
+      return this.props.dragRow;
+    }
+    return getConfig('tableDragRow');
+  }
+
+  @computed
   get rowHeight(): 'auto' | number {
     if ('rowHeight' in this.props) {
       return this.props.rowHeight;
@@ -278,16 +398,47 @@ export default class TableStore {
   }
 
   @computed
+  get autoFootHeight(): boolean {
+    if ('autoFootHeight' in this.props) {
+      return this.props.autoFootHeight;
+    }
+    return false;
+  }
+
+  @computed
   get emptyText(): ReactNode {
     return getConfig('renderEmpty')('Table');
   }
 
   @computed
-  get highLightRow(): boolean {
+  get highLightRow(): boolean | string {
     if ('highLightRow' in this.props) {
       return this.props.highLightRow;
     }
-    if (getConfig('tableHighLightRow') === false) {
+    const tableHighLightRow = getConfig('tableHighLightRow');
+    if (tableHighLightRow === false) {
+      return false;
+    }
+    return tableHighLightRow;
+  }
+
+  @computed
+  get parityRow(): boolean {
+    if ('parityRow' in this.props) {
+      return this.props.parityRow;
+    }
+    if (getConfig('tableParityRow') === true) {
+      return true;
+    }
+    return false;
+  }
+
+  @computed
+  get autoFocus(): boolean {
+    if ('autoFocus' in this.props) {
+      return this.props.autoFocus;
+    }
+    if (getConfig('tableAutoFocus') === false) {
       return false;
     }
     return true;
@@ -299,6 +450,17 @@ export default class TableStore {
       return this.props.selectedHighLightRow;
     }
     if (getConfig('tableSelectedHighLightRow') === false) {
+      return false;
+    }
+    return true;
+  }
+
+  @computed
+  get editorNextKeyEnterDown(): boolean {
+    if ('editorNextKeyEnterDown' in this.props) {
+      return this.props.editorNextKeyEnterDown;
+    }
+    if (getConfig('tableEditorNextKeyEnterDown') === false) {
       return false;
     }
     return true;
@@ -338,7 +500,7 @@ export default class TableStore {
     runInAction(() => {
       const { currentEditRecord, dataSet } = this;
       if (currentEditRecord) {
-        if (currentEditRecord.status === RecordStatus.add) {
+        if (currentEditRecord.isNew) {
           dataSet.remove(currentEditRecord);
         } else {
           currentEditRecord.reset();
@@ -375,12 +537,18 @@ export default class TableStore {
   @computed
   get useMouseBatchChoose(): boolean {
     const { useMouseBatchChoose } = this.props;
-    return useMouseBatchChoose || getConfig('tableUseMouseBatchChoose') || false;
+    if (useMouseBatchChoose !== undefined) {
+      return useMouseBatchChoose;
+    }
+    if (getConfig('tableUseMouseBatchChoose') !== undefined) {
+      return getConfig('tableUseMouseBatchChoose');
+    }
+    return false;
   }
 
   @computed
   get overflowX(): boolean {
-    if (this.width) {
+    if (isNumber(this.width)) {
       return this.totalLeafColumnsWidth > this.width;
     }
     return false;
@@ -398,12 +566,50 @@ export default class TableStore {
 
   @computed
   get columns(): ColumnProps[] {
-    const { columns, children } = this.props;
+    const { columnsMergeCoverage } = this.props;
+    let { columns, children } = this.props;
+    if (this.headersOrderable) {
+      if (columnsMergeCoverage && columns) {
+        columns = reorderingColumns(columnsMergeCoverage, columns);
+      } else {
+        children = reorderingColumns(columnsMergeCoverage, children);
+      }
+    }
+    // 分开处理可以满足于只修改表头信息场景不改变顺序
     return observable.array(
       this.addExpandColumn(
-        this.addSelectionColumn(columns ? mergeDefaultProps(columns) : normalizeColumns(children)),
+        this.addDragColumn(this.addRowNumberColumn(this.addSelectionColumn(columns
+          ? mergeDefaultProps(columns, this.headersEditable
+            ? columnsMergeCoverage
+            : undefined)
+          : normalizeColumns(children, this.headersEditable
+            ? columnsMergeCoverage :
+            undefined),
+        ))),
       ),
     );
+  }
+
+  set columns(columns: ColumnProps[]) {
+    runInAction(() => {
+      set(this.props, 'columns', columns);
+    });
+  }
+
+  /**
+   * 表头支持编辑
+   */
+  @computed
+  get headersEditable() {
+    return (this.props.columnsEditType === ColumnsEditType.header || this.props.columnsEditType === ColumnsEditType.all) && !!this.props.columnsMergeCoverage;
+  }
+
+  /**
+   * 表头支持排序
+   */
+  @computed
+  get headersOrderable() {
+    return (this.props.columnsEditType === ColumnsEditType.order || this.props.columnsEditType === ColumnsEditType.all) && !!this.props.columnsMergeCoverage;
   }
 
   @computed
@@ -513,7 +719,7 @@ export default class TableStore {
       data = data.filter(filter);
     }
     if (pristine) {
-      data = data.filter(record => record.status !== RecordStatus.add);
+      data = data.filter(record => !record.isNew);
     }
     if (showCachedSeletion) {
       return [...dataSet.cachedSelected, ...data];
@@ -523,33 +729,30 @@ export default class TableStore {
 
   @computed
   get indeterminate(): boolean {
-    const { dataSet, showCachedSeletion } = this;
+    const { dataSet } = this;
     if (dataSet) {
-      const { length } = dataSet.records.filter(record => record.selectable);
-      const selectedLength = showCachedSeletion
-        ? dataSet.selected.length
-        : dataSet.currentSelected.length;
-      return !!selectedLength && selectedLength !== length;
+      const selectedLength = dataSet.currentSelected.length;
+      return !!selectedLength && selectedLength !== dataSet.records.filter(record => record.selectable).length;
     }
     return false;
   }
 
   @computed
   get allChecked(): boolean {
-    const { dataSet, showCachedSeletion } = this;
+    const { dataSet } = this;
     if (dataSet) {
-      const { length } = dataSet.records.filter(record => record.selectable);
-      const selectedLength = showCachedSeletion
-        ? dataSet.selected.length
-        : dataSet.currentSelected.length;
-      return !!selectedLength && selectedLength === length;
+      const selectedLength = dataSet.currentSelected.length;
+      return !!selectedLength && selectedLength === dataSet.records.filter(record => record.selectable).length;
     }
     return false;
   }
 
   @computed
   get expandIconAsCell(): boolean {
-    const { expandedRowRenderer } = this.props;
+    const { expandedRowRenderer, expandIconAsCell } = this.props;
+    if (expandIconAsCell !== undefined) {
+      return expandIconAsCell;
+    }
     return !!expandedRowRenderer && !this.isTree;
   }
 
@@ -557,20 +760,30 @@ export default class TableStore {
   get expandIconColumnIndex(): number {
     const {
       expandIconAsCell,
-      props: { expandIconColumnIndex = 0 },
+      dragColumnAlign,
+      dragRow,
+      props: { expandIconColumnIndex = 0, rowNumber },
     } = this;
     if (expandIconAsCell) {
       return 0;
     }
-    if (this.hasRowBox) {
-      return expandIconColumnIndex + 1;
-    }
-    return expandIconColumnIndex;
+    return expandIconColumnIndex + [this.hasRowBox, rowNumber, dragColumnAlign && dragRow].filter(Boolean).length;
   }
 
   @computed
   get inlineEdit() {
     return this.props.editMode === TableEditMode.inline;
+  }
+
+  @computed
+  get columnMaxDeep() {
+    return this.columnDeep;
+  }
+
+  set columnMaxDeep(deep: number) {
+    runInAction(() => {
+      this.columnDeep = Math.max(this.columnDeep, deep);
+    });
   }
 
   private handleSelectAllChange = action(value => {
@@ -593,6 +806,10 @@ export default class TableStore {
       this.lockColumnsFootRowsHeight = {};
       this.node = node;
       this.expandedRows = [];
+      this.columnDeep = 0;
+      this.lastScrollTop = 0;
+      this.multiLineHeight = [];
+      this.rowHighLight = false;
     });
     this.setProps(node.props);
   }
@@ -637,34 +854,81 @@ export default class TableStore {
   }
 
   isRowExpanded(record: Record): boolean {
-    const { parent } = record;
-    const expanded =
-      (this.dataSet.props.expandField && record.isExpanded) ||
-      this.expandedRows.indexOf(record.key) !== -1;
-    return expanded && (!this.isTree || !parent || this.isRowExpanded(parent));
+    const { isExpanded = this.expandedRows.indexOf(record.key) !== -1 } = record;
+    return isExpanded && (!this.isTree || !record.parent || this.isRowExpanded(record.parent));
   }
 
+  /**
+   *
+   * @param record 想修改的record
+   * @param expanded 设置是否展开
+   * @param disHandler 设置是否需要触发展开事件
+   */
   @action
-  setRowExpanded(record: Record, expanded: boolean) {
-    if (this.dataSet.props.expandField) {
-      record.isExpanded = expanded;
-    }
-    const index = this.expandedRows.indexOf(record.key);
-    if (expanded) {
-      if (index === -1) {
-        this.expandedRows.push(record.key);
+  setRowExpanded(record: Record, expanded: boolean, disHandler?: boolean) {
+    record.isExpanded = expanded;
+    if (!this.inBatchExpansion) {
+      const index = this.expandedRows.indexOf(record.key);
+      if (expanded) {
+        if (index === -1) {
+          this.expandedRows.push(record.key);
+        }
+      } else if (index !== -1) {
+        this.expandedRows.splice(index, 1);
       }
-    } else if (index !== -1) {
-      this.expandedRows.splice(index, 1);
     }
     const { onExpand } = this.props;
-    if (onExpand) {
+    if (onExpand && !disHandler) {
       onExpand(expanded, record);
     }
+    if (expanded && this.canTreeLoadData) {
+      this.onTreeNodeLoad({ record });
+    }
+  }
+
+  isRowPending(record: Record): boolean {
+    return record.getState(PENDING_KEY) === true;
+  }
+
+  setRowPending(record: Record, pending: boolean) {
+    record.setState(PENDING_KEY, pending);
+  }
+
+  isRowLoaded(record: Record): boolean {
+    return record.getState(LOADED_KEY) === true;
+  }
+
+  setRowLoaded(record: Record, pending: boolean) {
+    record.setState(LOADED_KEY, pending);
   }
 
   isRowHover(record: Record): boolean {
     return this.hoverRow === record;
+  }
+
+  isRowClick(record: Record): boolean {
+    return this.clickRow === record;
+  }
+
+  @action
+  setRowClicked(record: Record, click: boolean) {
+    this.clickRow = click ? record : undefined;
+  }
+
+  @computed
+  get canTreeLoadData(): boolean {
+    const { treeLoadData, treeAsync } = this.props;
+    return treeAsync || !!treeLoadData;
+  }
+
+  @computed
+  get isRowHighLight() {
+    return this.rowHighLight || this.highLightRow === true;
+  }
+
+  @action
+  setRowHighLight(highLight: boolean) {
+    this.rowHighLight = highLight;
   }
 
   @action
@@ -673,13 +937,49 @@ export default class TableStore {
   }
 
   @action
+  setMultiLineHeight(multiLineHeight: number) {
+    this.multiLineHeight.push(multiLineHeight);
+  }
+
+  @action
   expandAll() {
-    this.dataSet.records.forEach(record => this.setRowExpanded(record, true));
+    this.inBatchExpansion = true;
+    this.expandedRows = this.dataSet.records.map(record => {
+      this.setRowExpanded(record, true);
+      return record.key;
+    });
+    this.inBatchExpansion = false;
   }
 
   @action
   collapseAll() {
+    this.inBatchExpansion = true;
     this.dataSet.records.forEach(record => this.setRowExpanded(record, false));
+    this.expandedRows = [];
+    this.inBatchExpansion = false;
+  }
+
+  @autobind
+  async onTreeNodeLoad({ record }: { record: Record }): Promise<any> {
+    const { dataSet, treeLoadData, treeAsync } = this.props;
+    const promises: Promise<any>[] = [];
+    this.setRowPending(record, true);
+    if (treeAsync && dataSet) {
+      const { idField, parentField } = dataSet.props;
+      if (idField && parentField && record && !record.children) {
+        const id = record.get(idField);
+        promises.push(dataSet.queryMore(-1, { [parentField]: id }));
+      }
+    }
+    if (treeLoadData) {
+      promises.push(treeLoadData({ record, dataSet }));
+    }
+    try {
+      await Promise.all(promises);
+      this.setRowLoaded(record, true);
+    } finally {
+      this.setRowPending(record, false);
+    }
   }
 
   private getLeafColumns(columns: ColumnProps[]): ColumnProps[] {
@@ -708,6 +1008,31 @@ export default class TableStore {
   }
 
   @autobind
+  renderSelectionBox({ record }): ReactNode {
+    return renderSelectionBox({ record, store: this });
+  }
+
+  @autobind
+  renderRowNumber({ record, dataSet }): ReactNode {
+    const { isTree, props: { rowNumber } } = this;
+    const numbers = getRowNumbers(record, dataSet, isTree);
+    const number = numbers.join('-');
+    if (typeof rowNumber === 'function') {
+      return rowNumber({ record, dataSet, text: number, pathNumbers: numbers });
+    }
+    return number;
+  }
+
+  @autobind
+  renderDragBox({ record }) {
+    const { rowDragRender } = this.props;
+    if (rowDragRender && isFunction(rowDragRender.renderIcon)) {
+      return rowDragRender.renderIcon({ record });
+    }
+    return (<Icon type="baseline-drag_indicator" />);
+  }
+
+  @autobind
   private multipleSelectionRenderer() {
     return (
       <ObserverCheckBox
@@ -719,6 +1044,24 @@ export default class TableStore {
     );
   }
 
+  private addRowNumberColumn(columns: ColumnProps[]): ColumnProps[] {
+    const { suffixCls, prefixCls, rowNumber } = this.props;
+    if (rowNumber) {
+      const rowNumberColumn: ColumnProps = {
+        key: ROW_NUMBER_KEY,
+        resizable: false,
+        className: `${getProPrefixCls(suffixCls!, prefixCls)}-row-number-column`,
+        renderer: this.renderRowNumber,
+        tooltip: TableColumnTooltip.overflow,
+        align: ColumnAlign.center,
+        width: 50,
+        lock: true,
+      };
+      columns.unshift(rowNumberColumn);
+    }
+    return columns;
+  }
+
   private addSelectionColumn(columns: ColumnProps[]): ColumnProps[] {
     if (this.hasRowBox) {
       const { dataSet } = this;
@@ -727,7 +1070,7 @@ export default class TableStore {
         key: SELECTION_KEY,
         resizable: false,
         className: `${getProPrefixCls(suffixCls!, prefixCls)}-selection-column`,
-        renderer: ({ record }) => renderSelectionBox({ record, store: this }),
+        renderer: this.renderSelectionBox,
         align: ColumnAlign.center,
         width: 50,
         lock: true,
@@ -740,4 +1083,30 @@ export default class TableStore {
     }
     return columns;
   }
+
+  private addDragColumn(columns: ColumnProps[]): ColumnProps[] {
+    const { dragColumnAlign, dragRow, props: { suffixCls, prefixCls } } = this;
+    if (dragColumnAlign && dragRow) {
+      const dragColumn: ColumnProps = {
+        key: DRAG_KEY,
+        resizable: false,
+        className: `${getProPrefixCls(suffixCls!, prefixCls)}-drag-column`,
+        renderer: this.renderDragBox,
+        align: ColumnAlign.center,
+        width: 50,
+      };
+      if (dragColumnAlign === DragColumnAlign.left) {
+        dragColumn.lock = ColumnLock.left;
+        columns.unshift(dragColumn);
+      }
+
+      if (dragColumnAlign === DragColumnAlign.right) {
+        dragColumn.lock = ColumnLock.right;
+        columns.push(dragColumn);
+      }
+
+    }
+    return columns;
+  }
+
 }

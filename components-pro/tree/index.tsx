@@ -1,26 +1,21 @@
 import Set from 'core-js/library/fn/set';
-import React, { Component,MouseEvent} from 'react';
+import React, { Component, Key, MouseEvent } from 'react';
 import PropTypes from 'prop-types';
 import { observer } from 'mobx-react';
-import { computed, action, observable, runInAction } from 'mobx';
+import { action, computed, observable, runInAction } from 'mobx';
 import noop from 'lodash/noop';
-import C7NTree, {
-  TreeNode,
-  DataNode,
-  C7nTreeNodeProps,
-  EventDataNode,
-  TreeProps as C7NTreeProps,
-} from 'choerodon-ui/lib/tree';
+import C7NTree, { C7nTreeNodeProps, DataNode, EventDataNode, TreeNode, TreeProps as C7NTreeProps } from 'choerodon-ui/lib/tree';
 import autobind from 'choerodon-ui/pro/lib/_util/autobind';
 import DataSet from '../data-set/DataSet';
-import { getKey, getTreeNodes, NodeRenderer, TreeNodeRenderer} from './util';
+import { getKey, getTreeNodes, NodeRenderer, TreeNodeRenderer } from './util';
 import { BooleanValue, DataSetSelection } from '../data-set/enum';
 import Spin from '../spin';
 
-interface C7nNodeEvent extends EventDataNode {
-  eventKey:string
+export interface C7nNodeEvent extends EventDataNode {
+  eventKey: string
 }
-interface TreeNodeCheckedEvent {
+
+export interface TreeNodeCheckedEvent {
   event: 'check';
   node: C7nNodeEvent;
   checked: boolean;
@@ -30,30 +25,37 @@ interface TreeNodeCheckedEvent {
   halfCheckedKeys?: string[];
 }
 
-interface C7nTreeNodeSelectedEvent {
-  event: "select";
+export interface C7nTreeNodeSelectedEvent {
+  event: 'select';
   selected: boolean;
   node: C7nNodeEvent;
   selectedNodes: DataNode[];
-  nativeEvent:MouseEvent;
+  nativeEvent: MouseEvent;
 }
-interface C7nTreeNodeExpandedEvent {
-  expanded:boolean;
-  nativeEvent:MouseEvent;
-  node:C7nNodeEvent;
+
+export interface C7nTreeNodeExpandedEvent {
+  expanded: boolean;
+  nativeEvent: MouseEvent;
+  node: C7nNodeEvent;
 }
+
 export interface TreeProps extends C7NTreeProps {
   dataSet?: DataSet;
   renderer?: NodeRenderer;
   titleField?: string;
-  treeNodeRenderer?:TreeNodeRenderer;
+  onTreeNode?: TreeNodeRenderer;
+  /**
+   * @deprecated
+   */
+  treeNodeRenderer?: TreeNodeRenderer;
+  async?: boolean;
 }
 
-function defaultRenderer({ text }) {
+export function defaultRenderer({ text }) {
   return text;
 }
 
-function defaultNodeCover(){
+function defaultNodeCover() {
   return {};
 }
 
@@ -128,12 +130,12 @@ export default class Tree extends Component<TreeProps> {
 
 
   componentWillReceiveProps(nextProps) {
-    const {defaultExpandAll,defaultSelectedKeys,defaultExpandedKeys,defaultCheckedKeys} = this.props;
-    if(defaultExpandAll !== nextProps.defaultExpandAll ||
+    const { defaultExpandAll, defaultSelectedKeys, defaultExpandedKeys, defaultCheckedKeys } = this.props;
+    if (defaultExpandAll !== nextProps.defaultExpandAll ||
       defaultExpandedKeys !== nextProps.defaultExpandedKeys ||
       defaultCheckedKeys !== nextProps.defaultCheckKeys ||
       defaultSelectedKeys !== nextProps.defaultSelectedKeys
-      ){
+    ) {
       this.processDataSetListener(false);
       this.processDataSetListener(true);
     }
@@ -167,39 +169,39 @@ export default class Tree extends Component<TreeProps> {
         defaultExpandedKeys,
       },
     } = this;
-    this.stateExpandedKeys = this.dealDefalutCheckExpand(dataSet,defaultExpandedKeys,defaultExpandAll)
+    this.stateExpandedKeys = this.dealDefalutCheckExpand(dataSet, defaultExpandedKeys, defaultExpandAll);
   }
 
   @action
-  initDefaultCheckRows(){
+  initDefaultCheckRows() {
     const {
       props: {
         dataSet,
         defaultCheckedKeys,
       },
     } = this;
-    this.stateCheckedKeys = this.dealDefalutCheckExpand(dataSet,defaultCheckedKeys)
+    this.stateCheckedKeys = this.dealDefalutCheckExpand(dataSet, defaultCheckedKeys);
   }
 
   @action
-  initDefaultSelectRows(){
+  initDefaultSelectRows() {
     const {
       props: {
         dataSet,
         defaultSelectedKeys,
       },
     } = this;
-    if(dataSet && (defaultSelectedKeys)){
+    if (dataSet && (defaultSelectedKeys)) {
       const { idField } = dataSet.props;
       defaultSelectedKeys.map(selectKey => {
         const found = dataSet.find(
           record => selectKey === String(idField ? record.get(idField) : record.id),
         );
-        if(found){
-          dataSet.select(found)
+        if (found) {
+          dataSet.select(found);
         }
-        return null
-      })
+        return null;
+      });
     }
 
   }
@@ -210,30 +212,30 @@ export default class Tree extends Component<TreeProps> {
    * @param defalutAll
    * @param defalutKeys
    */
-  dealDefalutCheckExpand(dataSet:DataSet|undefined,defalutKeys:string[]|undefined,defalutAll?:boolean){
-    let defalutStateKeys: string[] = []
-    if(dataSet){
-      const {idField, expandField} = dataSet.props;
-      if ( defalutAll && !expandField) {
+  dealDefalutCheckExpand(dataSet: DataSet | undefined, defalutKeys: Key[] | undefined, defalutAll?: boolean) {
+    let defalutStateKeys: string[] = [];
+    if (dataSet) {
+      const { idField, expandField } = dataSet.props;
+      if (defalutAll && !expandField) {
         defalutStateKeys = dataSet.reduce<(string)[]>((array, record) => {
           if (record.children) {
             array.push(getKey(record, idField));
           }
           return array;
         }, []);
-      }else if(defalutKeys && !expandField){
+      } else if (defalutKeys && !expandField) {
         defalutStateKeys = dataSet.reduce<(string)[]>((array, record) => {
           defalutKeys.map((key) => {
-            if(getKey(record,idField) === key){
-              array.push(key)
+            if (getKey(record, idField) === key) {
+              array.push(key);
             }
-            return null
-          })
+            return null;
+          });
           return array;
-        },[]);
+        }, []);
       }
     }
-    return defalutStateKeys
+    return defalutStateKeys;
   }
 
   @computed
@@ -332,8 +334,8 @@ export default class Tree extends Component<TreeProps> {
             checkField,
             field
               ? checked
-                ? field.get(BooleanValue.trueValue)
-                : field.get(BooleanValue.falseValue)
+              ? field.get(BooleanValue.trueValue)
+              : field.get(BooleanValue.falseValue)
               : checked,
           );
           return false;
@@ -343,7 +345,8 @@ export default class Tree extends Component<TreeProps> {
     return true;
   }
 
-  handleExpand = (expandedKeys: string[], eventObj: C7nTreeNodeExpandedEvent) => {
+  @autobind
+  handleExpand(expandedKeys: string[], eventObj: C7nTreeNodeExpandedEvent) {
     if (this.setExpand(eventObj)) {
       runInAction(() => {
         this.stateExpandedKeys = expandedKeys;
@@ -352,21 +355,22 @@ export default class Tree extends Component<TreeProps> {
     const { onExpand = noop } = this.props;
     // @ts-ignore
     onExpand(expandedKeys, eventObj);
-  };
+  }
 
-  handleCheck = (checkedKeys: string[], eventObj: TreeNodeCheckedEvent) => {
+  @autobind
+  handleCheck(checkedKeys: string[], eventObj: TreeNodeCheckedEvent) {
     if (this.setCheck(eventObj)) {
       runInAction(() => {
         this.stateCheckedKeys = checkedKeys;
       });
     }
     const { onCheck = noop } = this.props;
-    // @ts-ignore
     onCheck(checkedKeys, eventObj);
-  };
+  }
 
-  handleSelect = (_selectedKeys: string[], eventObj: C7nTreeNodeSelectedEvent) => {
-    const { dataSet } = this.props;
+  @autobind
+  handleSelect(selectedKeys: string[], eventObj: C7nTreeNodeSelectedEvent) {
+    const { dataSet, onSelect = noop } = this.props;
     if (dataSet) {
       const { idField } = dataSet.props;
       const { node, selected } = eventObj;
@@ -381,34 +385,65 @@ export default class Tree extends Component<TreeProps> {
           dataSet.unSelect(found);
         }
       }
+      onSelect(selectedKeys, eventObj);
     }
-  };
+  }
+
+  @autobind
+  handleLoadData(event): Promise<any> {
+    const { dataSet, loadData } = this.props;
+    const promises: Promise<any>[] = [];
+    if (dataSet) {
+      const { idField, parentField } = dataSet.props;
+      const { record } = event.props;
+      if (idField && parentField && record && !record.children) {
+        const id = record.get(idField);
+        promises.push(dataSet.queryMore(-1, { [parentField]: id }));
+      }
+    }
+    if (loadData) {
+      promises.push(loadData(event));
+    }
+    return Promise.all(promises);
+  }
 
   render() {
-    const { dataSet, renderer = defaultRenderer, titleField, treeNodeRenderer = defaultNodeCover,loadData ,...otherProps } = this.props;
+    const { dataSet, renderer = defaultRenderer, titleField, treeNodeRenderer, onTreeNode, loadData, async, ...otherProps } = this.props;
     if (dataSet) {
+      const { defaultExpandAll } = otherProps;
       const props: TreeProps = {};
       props.treeData = getTreeNodes(
         dataSet,
         dataSet.treeData,
-        this.forceRenderKeys,
+        defaultExpandAll ? [] : this.forceRenderKeys,
         renderer,
         // @ts-ignore
-        treeNodeRenderer,
-        loadData,
+        onTreeNode || treeNodeRenderer || defaultNodeCover,
+        async || !!loadData,
         titleField,
-      );
+        defaultExpandAll,
+      ) || [];
       // @ts-ignore
       props.onExpand = this.handleExpand;
       // @ts-ignore
       props.onCheck = this.handleCheck;
       // @ts-ignore
       props.onSelect = this.handleSelect;
-      props.loadData = loadData;
+      if (async) {
+        props.loadData = this.handleLoadData;
+      } else {
+        props.loadData = loadData;
+      }
       props.expandedKeys = this.expandedKeys.slice();
-      props.checkedKeys = this.checkedKeys.slice();
-      props.multiple = dataSet.props.selection === DataSetSelection.multiple;
-      props.selectedKeys = this.selectedKeys.slice();
+      if (!('checkedKeys' in otherProps)) {
+        props.checkedKeys = this.checkedKeys.slice();
+      }
+      if (!('multiple' in otherProps)) {
+        props.multiple = dataSet.props.selection === DataSetSelection.multiple;
+      }
+      if (!('selectedKeys' in otherProps)) {
+        props.selectedKeys = this.selectedKeys.slice();
+      }
       return (
         <Spin dataSet={dataSet}>
           <C7NTree {...otherProps} {...props} />

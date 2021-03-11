@@ -35,7 +35,9 @@ const prefixCls = getConfig('prefixCls');
 | lovQueryUrl | Lov 取值的地址或返回地址的钩子 | string \| ((code: string) => string) | code => \`/common/lov/dataset/\${code}\` |
 | lovQueryAxiosConfig | Lov 查询数据请求的配置或钩子，详见[AxiosRequestConfig](#AxiosRequestConfig)。 配置中默认 url 为 lovQueryUrl， method 为 post。 | AxiosRequestConfig \| (code: string, lovConfig?: LovConfig, { dataSet, params, data }) => AxiosRequestConfig | - |
 | lovTriggerMode | Lov 触发弹窗模式，可选 `icon` `input`。 | string | icon |
+| lovModalProps | Lov 弹窗属性，详见[ModalProps](/components/modal/#Modal) | ModalProps |  |
 | lookupBatchAxiosConfig | 返回 lookup 批量查询配置的钩子，详见[AxiosRequestConfig](#AxiosRequestConfig)。 | (codes: string[]) => AxiosRequestConfig | - |
+| selectReverse | 是否开启下拉多选反向功能。 | boolean | true |
 | axios | 替换内置的 axios 实例 | AxiosInstance |  |
 | dataKey | 默认 DataSet 的 dataKey | string | rows |
 | totalKey | 默认 DataSet 的 totalKey | string | total |
@@ -47,6 +49,7 @@ const prefixCls = getConfig('prefixCls');
 | tableBorder | 默认 Table 的 border | boolean | true |
 | tableHighLightRow | 默认 Table 当前行高亮 | boolean | true |
 | tableSelectedHighLightRow | 默认 Table 当前勾选行高亮 | boolean | false |
+| tableParityRow | 默认 Table 奇偶行 | boolean |  |
 | tableRowHeight | 默认 Table 行高 | auto \| number | 30 |
 | tableColumnResizable | 默认 Table 列可调整列宽 | boolean | true |
 | tableExpandIcon | 默认 Table 自定义展开图标 | ({ prefixCls, expanded, expandable, needIndentSpaced, record, onExpand }) => ReactNode |  |
@@ -56,13 +59,26 @@ const prefixCls = getConfig('prefixCls');
 | tableDefaultRenderer | 默认 Table 为空时 renderer 的内容 | ReactNode | '' |
 | tableAlwaysShowRowBox | Table是否一直显示rowbox,开启后在其他模式下也会显示rowbox | boolean | false |
 | tableUseMouseBatchChoose | Table是否使用鼠标批量选择,开启后在rowbox的情况下可以进行鼠标拖动批量选择,在起始的rowbox处按下,在结束位置松开 | boolean | false |
+| tableEditorNextKeyEnterDown | Table是否开启可编辑行回车编辑下一行 | boolean | true |
+| tableDragRow | Table是否开启行拖拽 | boolean | false |
+| tableDragColumn | Table是否开启列拖拽 | boolean | false |
+| tableDragColumnAlign | Table列拖拽的模式 | 'left'\|'right' | - |
+| tableAutoFocus | Table 新增行自动聚焦至第一个可编辑字段 | boolean | false |
+| tableKeyboard | Table 开启或关闭新增的快捷按钮事件 | boolean | false |
+| tableFilterAdapter | Table 筛选条请求适配器 | AxiosRequestConfig | |
+| tableFilterSuffix | Table 筛选条按钮预留区 | ReactNode | |
+| tableFilterSearchText | Table 筛选条快速搜索参数名 | string | 'params' |
+| tableAutoHeightDiff | Table 自动高度误差值配置 | number | 80 |
 | pagination | 默认 pagination 的属性 | TablePaginationConfig \| false | 详见[Pagination](/components-pro/pagination/#Pagination) |
 | dropdownMatchSelectWidth | 默认下拉框匹配输入框宽度 | boolean | true |
 | modalSectionBorder | 默认 Modal 的头和脚有边框线 | boolean | true |
 | modalOkFirst | 默认 Modal 的 ok 按钮排在第一个 | boolean | true |
+| modalKeyboard | Modal 是否支持键盘 esc 关闭 | boolean | true |
+| modalAutoCenter | Modal 是否默认居中 | boolean | false |
+| drawerOkFirst | 默认 Modal drawer 的 ok 按钮排在第一个，优先级高于 modalOkFirst | boolean \| undefined | undefined |
 | buttonFuncType | 默认 Button 的功能类型 | string | raised |
 | buttonColor | 默认 Button 的颜色 | string | default |
-| renderEmpty | 自定义组件空状态。 | (componentName: string) => ReactNode | - |
+| renderEmpty | 自定义组件空状态。componentName会接收到的值为 `Table` `Select`,在实现函数的时候需要对这两个输入进行处理,**注意需要同时处理Table以及Select**,默认值参考源代码的[defaultRenderEmpty](https://github.com/open-hand/choerodon-ui/blob/master/components/configure/index.tsx) | (componentName: string) => ReactNode | - |
 | defaultValidationMessages | 自定义校验信息, 详见[ValidationMessages](#ValidationMessages) | ValitionMessages | - |
 | generatePageQuery | 分页参数转换的钩子 | ({ page?: number, pageSize?: number, sortName?: string, sortOrder?: string }) => object | - |
 | feedback | DataSet 查询和提交数据的反馈配置, 详见[Feedback](/components-pro/data-set/#Feedback) | Feedback |  |
@@ -71,6 +87,14 @@ const prefixCls = getConfig('prefixCls');
 | useColon | Form中是否使用冒号,当开启时会在所有的label后面加上冒号,并且必填的*号会被移到最前方 | boolean | false |
 | excludeUseColonTagList | Form中不使用冒号的标签的列表,当为自定义组件的时候,需要设置displayName作为标签名 | string[] | ['div','button','Button'] |
 | lovTableProps | 全局配置lov的tableProps,当同时存在lovTableProps以及的时候会进行一层合并 | [TableProps](/components-pro/table/) | {} |
+| collapseExpandIconPosition | 全局配置 collapse 图标位置 |  `left` \| `right` | `left` |
+| collapseExpandIcon | 全局配置 collapse 自定义切换图标| (panelProps) => ReactNode \| `text`(预置icon + 展开收起文字) | 无 |
+| collapseTrigger | 全局配置切换面板的触发位置 | `header` \| `icon` | `header` |
+| textFieldAutoComplete | 全局配置textField的autoComplete属性 | 可选值: `on` `off` |  |
+| resultStatusRenderer | 自定义状态展示,可以覆盖现有状态展示，也可以增加状态展示，支持全局配置 | object -> {string:react.ReactNode} | - |
+| numberFieldNonStrictStep | 全局配置 NumberField 的 nonStrictStep 属性 | boolean | false |
+| numberFieldFormatter | NumberField格式器   | FormatNumberFunc: (value: string, lang: string, options: Intl.NumberFormatOptions) => string |        |
+| numberFieldFormatterOptions | NumberField格式器参数,可以与组件值进行合并   | FormatNumberFuncOptions: { lang?: string, options?: Intl.NumberFormatOptions } |        |
 
 ### Formatter
 

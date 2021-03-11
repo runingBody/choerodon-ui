@@ -22,7 +22,7 @@ title: Form
 | processParams | Ajax 提交时的参数回调 | (event) => object |  |
 | useColon | 是否使用冒号,当开启时会在所有的label后面加上冒号,并且必填的*号会被移到最前方 | boolean | false |
 | excludeUseColonTagList | 不使用冒号的标签的列表,当为自定义组件的时候,需要设置displayName作为标签名 | string[] | ['div','button','Button'] |
-| labelWidth | 内部控件的标签宽度。如果为数组则分别对应每列的标签宽度。数组长度不够列数，以默认值补全, 响应式参考[Responsive](#Form Responsive) | number\| number[] \| object | 100 |
+| labelWidth | 内部控件的标签宽度。如果为数组则分别对应每列的标签宽度。数组长度不够列数，以默认值补全, 响应式参考[Responsive](#Form Responsive), 如果为auto，则根据内部label最大长度来对齐所有label | number\| 'auto' \| ('auto' \| number)[] \| object | 100 |
 | labelAlign | 标签文字对齐方式, 只在 labelLayout 为`horizontal`时起作用，可选值： `left` `center` `right`, 响应式参考[Responsive](#Form Responsive) | string \| object | right |
 | labelLayout | 标签位置, 可选值 `horizontal` `vertical` `placeholder` `float` `none`, 响应式参考[Responsive](#Form Responsive) | string \| object | horizontal |
 | dataIndex | 对照 record 在 DataSet 中的 index | number | ds.currentIndex |
@@ -33,6 +33,7 @@ title: Form
 | onReset | 重置回调 | Function |  |
 | onSuccess | 提交成功回调 | Function |  |
 | onError | 提交失败回调 | Function |  |
+| separateSpacing | 切分单元格间隔，当 label 布局为默认值 horizontal 时候使用padding修改单元格横向间距可能需要结合labelwidth效果会更好 | {width:number,height:number} | - |
 
 更多属性请参考 [DataSetComponent](/components-pro/core/#DataSetComponent)。
 

@@ -1,20 +1,18 @@
-// @ts-nocheck
-import * as React from 'react';
-import toArray from 'rc-util/lib/Children/toArray';
-import warning from 'rc-util/lib/warning';
-import {
-  DataNode,
-  FlattenNode,
-  NodeElement,
-  DataEntity,
-  Key,
-  EventDataNode,
-} from '../interface';
-// @ts-ignore
+import React, { Children } from 'react';
+import warning from '../../../_util/warning';
+import { DataEntity, DataNode, EventDataNode, FlattenNode, GetKey, Key, NodeElement } from '../interface';
 import { getPosition, isTreeNode } from '../util';
 import { TreeNodeProps } from '../TreeNode';
 
-export function getKey(key: Key, pos: string) {
+export function toArray(children) {
+  const ret: any[] = [];
+
+  Children.forEach(children, (c) => ret.push(c));
+
+  return ret;
+}
+
+export function getKey(key: Key | null | undefined, pos: string) {
   if (key !== null && key !== undefined) {
     return key;
   }
@@ -27,7 +25,7 @@ export function getKey(key: Key, pos: string) {
 export function warningWithoutKey(treeData: DataNode[] = []) {
   const keys: Map<string, boolean> = new Map();
 
-  function dig(list: DataNode[], path: string = '') {
+  function dig(list: DataNode[] | undefined, path: string = '') {
     (list || []).forEach(treeNode => {
       const { key, children } = treeNode;
       warning(
@@ -56,32 +54,29 @@ export function convertTreeToData(rootNodes: React.ReactNode): DataNode[] {
   function dig(node: React.ReactNode): DataNode[] {
     const treeNodes = toArray(node) as NodeElement[];
     return treeNodes
-      .map(treeNode => {
+      .reduce<DataNode[]>((array, treeNode) => {
         // Filter invalidate node
         if (!isTreeNode(treeNode)) {
-          warning(
-            !treeNode,
-            'Tree/TreeNode can only accept TreeNode as children.',
-          );
-          return null;
+          warning(!treeNode, 'Tree/TreeNode can only accept TreeNode as children.');
+        } else {
+
+          const { key } = treeNode;
+          const { children, ...rest } = treeNode.props;
+
+          const dataNode: DataNode = {
+            key,
+            ...rest,
+          } as DataNode;
+
+          const parsedChildren = dig(children);
+          if (parsedChildren.length) {
+            dataNode.children = parsedChildren;
+          }
+          array.push(dataNode);
         }
 
-        const { key } = treeNode;
-        const { children, ...rest } = treeNode.props;
-
-        const dataNode: DataNode = {
-          key,
-          ...rest,
-        };
-
-        const parsedChildren = dig(children);
-        if (parsedChildren.length) {
-          dataNode.children = parsedChildren;
-        }
-
-        return dataNode;
-      })
-      .filter((dataNode: DataNode) => dataNode);
+        return array;
+      }, []);
   }
 
   return dig(rootNodes);
@@ -100,7 +95,7 @@ export function flattenTreeData(
   const expandedKeySet = new Set(expandedKeys === true ? [] : expandedKeys);
   const flattenList: FlattenNode[] = [];
 
-  function dig(list: DataNode[], parent: FlattenNode = null): FlattenNode[] {
+  function dig(list: DataNode[], parent: FlattenNode | null = null): FlattenNode[] {
     return list.map((treeNode, index) => {
       const pos: string = getPosition(parent ? parent.pos : '0', index);
       const mergedKey = getKey(treeNode.key, pos);
@@ -114,7 +109,7 @@ export function flattenTreeData(
         data: treeNode,
         isStart: [...(parent ? parent.isStart : []), index === 0],
         isEnd: [...(parent ? parent.isEnd : []), index === list.length - 1],
-      };
+      } as FlattenNode;
 
       flattenList.push(flattenNode);
 
@@ -134,39 +129,77 @@ export function flattenTreeData(
   return flattenList;
 }
 
+type ExternalGetKey = GetKey<DataNode> | string;
+
+interface TraverseDataNodesConfig {
+  childrenPropName?: string;
+  externalGetKey?: ExternalGetKey;
+}
+
+export type CallbackData = {
+  node: DataNode;
+  index: number;
+  pos: string;
+  key: Key;
+  parentPos: string | number;
+  level: number;
+};
+
 /**
  * Traverse all the data by `treeData`.
  * Please not use it out of the `rc-tree` since we may refactor this code.
  */
 export function traverseDataNodes(
   dataNodes: DataNode[],
-  callback: (data: {
-    node: DataNode;
-    index: number;
-    pos: string;
-    key: Key;
-    parentPos: string | number;
-    level: number;
-  }) => void,
+  callback: (data: CallbackData) => void,
+  // To avoid too many params, let use config instead of origin param
+  config?: TraverseDataNodesConfig | ExternalGetKey,
 ) {
+  // Init config
+  let externalGetKey: ExternalGetKey | undefined | null = null;
+  let childrenPropName: string | undefined;
+
+  const configType = typeof config;
+
+  if (configType === 'function' || configType === 'string') {
+    // Legacy getKey param
+    externalGetKey = config as ExternalGetKey;
+  } else if (config && configType === 'object') {
+    ({ childrenPropName, externalGetKey } = config as TraverseDataNodesConfig);
+  }
+
+  // Get keys
+  let syntheticGetKey: (node: DataNode, pos?: string) => Key;
+  if (externalGetKey) {
+    if (typeof externalGetKey === 'string') {
+      syntheticGetKey = (node: DataNode) => (node as any)[externalGetKey as string];
+    } else if (typeof externalGetKey === 'function') {
+      syntheticGetKey = (node: DataNode) => (externalGetKey as GetKey<DataNode>)(node);
+    }
+  } else {
+    syntheticGetKey = (node: DataNode, pos: string) => getKey(node.key, pos);
+  }
+
+  // Process
   function processNode(
-    node: DataNode,
+    node: DataNode | null,
     index?: number,
-    parent?: { node: DataNode; pos: string; level: number },
+    parent?: { node: DataNode | null; pos: string; level: number },
   ) {
-    const children = node ? node.children : dataNodes;
-    const pos = node ? getPosition(parent.pos, index) : '0';
+    const children = node ? node[childrenPropName || 'children'] : dataNodes;
+    const pos = node && parent ? getPosition(parent.pos, index) : '0';
 
     // Process node if is not root
-    if (node) {
-      const data = {
+    if (node && parent) {
+      const key: Key = syntheticGetKey(node, pos);
+      const data: CallbackData = {
         node,
         index,
         pos,
-        key: node.key !== null ? node.key : pos,
+        key,
         parentPos: parent.node ? parent.pos : null,
         level: parent.level + 1,
-      };
+      } as CallbackData;
 
       callback(data);
     }
@@ -200,12 +233,21 @@ export function convertDataToEntities(
     initWrapper,
     processEntity,
     onProcessFinished,
+    externalGetKey,
+    childrenPropName,
   }: {
     initWrapper?: (wrapper: Wrapper) => Wrapper;
     processEntity?: (entity: DataEntity, wrapper: Wrapper) => void;
     onProcessFinished?: (wrapper: Wrapper) => void;
+    externalGetKey?: ExternalGetKey;
+    childrenPropName?: string;
   } = {},
+  /** @deprecated Use `config.externalGetKey` instead */
+  legacyExternalGetKey?: ExternalGetKey,
 ) {
+  // Init config
+  const mergedExternalGetKey = externalGetKey || legacyExternalGetKey;
+
   const posEntities = {};
   const keyEntities = {};
   let wrapper = {
@@ -217,26 +259,30 @@ export function convertDataToEntities(
     wrapper = initWrapper(wrapper) || wrapper;
   }
 
-  traverseDataNodes(dataNodes, item => {
-    const { node, index, pos, key, parentPos, level } = item;
-    const entity: DataEntity = { node, index, key, pos, level };
+  traverseDataNodes(
+    dataNodes,
+    item => {
+      const { node, index, pos, key, parentPos, level } = item;
+      const entity: DataEntity = { node, index, key, pos, level };
 
-    const mergedKey = getKey(key, pos);
+      const mergedKey = getKey(key, pos);
 
-    posEntities[pos] = entity;
-    keyEntities[mergedKey] = entity;
+      posEntities[pos] = entity;
+      keyEntities[mergedKey] = entity;
 
-    // Fill children
-    entity.parent = posEntities[parentPos];
-    if (entity.parent) {
-      entity.parent.children = entity.parent.children || [];
-      entity.parent.children.push(entity);
-    }
+      // Fill children
+      entity.parent = posEntities[parentPos];
+      if (entity.parent) {
+        entity.parent.children = entity.parent.children || [];
+        entity.parent.children.push(entity);
+      }
 
-    if (processEntity) {
-      processEntity(entity, wrapper);
-    }
-  });
+      if (processEntity) {
+        processEntity(entity, wrapper);
+      }
+    },
+    { externalGetKey: mergedExternalGetKey, childrenPropName },
+  );
 
   if (onProcessFinished) {
     onProcessFinished(wrapper);
@@ -287,6 +333,8 @@ export function getTreeNodeProps(
     pos: String(entity ? entity.pos : ''),
 
     // [Legacy] Drag props
+    // Since the interaction of drag is changed, the semantic of the props are
+    // not accuracy, I think it should be finally removed
     dragOver: dragOverNodeKey === key && dropPosition === 0,
     dragOverGapTop: dragOverNodeKey === key && dropPosition === -1,
     dragOverGapBottom: dragOverNodeKey === key && dropPosition === 1,
@@ -295,9 +343,7 @@ export function getTreeNodeProps(
   return treeNodeProps;
 }
 
-export function convertNodePropsToEventData(
-  props: TreeNodeProps,
-): EventDataNode {
+export function convertNodePropsToEventData(props: TreeNodeProps): EventDataNode {
   const {
     data,
     expanded,
@@ -313,7 +359,7 @@ export function convertNodePropsToEventData(
     active,
   } = props;
 
-  const eventData = {
+  const eventData: EventDataNode = {
     ...data,
     expanded,
     selected,
@@ -326,7 +372,7 @@ export function convertNodePropsToEventData(
     dragOverGapBottom,
     pos,
     active,
-  };
+  } as EventDataNode;
 
   if (!('props' in eventData)) {
     Object.defineProperty(eventData, 'props', {
